@@ -105,7 +105,10 @@ func buildHoustonIncident(row houstonRow, lat, lng float64) Incident {
 		addr = row.address + " @ " + row.crossStreet
 	}
 
-	t, _ := time.Parse("01/02/2006 15:04", row.callTime)
+	var t time.Time
+	if loc, err := time.LoadLocation("America/Chicago"); err == nil {
+		t, _ = time.ParseInLocation("01/02/2006 15:04", row.callTime, loc)
+	}
 	if t.IsZero() {
 		t = time.Now()
 	}
@@ -122,9 +125,14 @@ func buildHoustonIncident(row houstonRow, lat, lng float64) Incident {
 	}
 }
 
+// houstonSyncBatch is the number of uncached addresses to geocode synchronously
+// on each fetch, so the first call always returns some incidents immediately.
+const houstonSyncBatch = 5
+
 // FetchHoustonIncidents scrapes active HFD/HPD incidents from the City of Houston.
-// Incidents without cached geocoordinates are geocoded in the background; they
-// will appear on the next refresh once the cache is warm.
+// Up to houstonSyncBatch uncached addresses are geocoded synchronously so the
+// caller receives results on the very first fetch. The remainder are geocoded in
+// the background and will appear on subsequent refreshes.
 func FetchHoustonIncidents() ([]Incident, error) {
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest("GET", houstonURL, nil)
@@ -157,7 +165,34 @@ func FetchHoustonIncidents() ([]Incident, error) {
 	houstonGeoMu.RUnlock()
 
 	if len(uncached) > 0 {
-		go geocodeHoustonRows(uncached)
+		// Geocode the first batch synchronously so we return something immediately.
+		syncBatch := uncached
+		var asyncBatch []houstonRow
+		if len(uncached) > houstonSyncBatch {
+			syncBatch = uncached[:houstonSyncBatch]
+			asyncBatch = uncached[houstonSyncBatch:]
+		}
+
+		for _, row := range syncBatch {
+			street := row.address
+			if row.crossStreet != "" {
+				street = row.address + " & " + row.crossStreet
+			}
+			lat, lng, err := GeocodeAddress(street, "Houston", "TX")
+			if err != nil || (lat == 0 && lng == 0) {
+				continue
+			}
+			key := houstonCacheKey(row)
+			houstonGeoMu.Lock()
+			houstonGeoData[key] = [2]float64{lat, lng}
+			houstonGeoMu.Unlock()
+			incidents = append(incidents, buildHoustonIncident(row, lat, lng))
+		}
+		saveHoustonGeoCache()
+
+		if len(asyncBatch) > 0 {
+			go geocodeHoustonRows(asyncBatch)
+		}
 	}
 
 	return incidents, nil
