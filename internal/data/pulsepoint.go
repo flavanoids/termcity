@@ -73,6 +73,13 @@ func lookupPSAP(lat, lng float64) (string, error) {
 		return "", fmt.Errorf("PSAP HTTP %d", resp.StatusCode)
 	}
 
+	// The legacy giba.php endpoint now returns an HTML SPA instead of JSON,
+	// indicating PulsePoint has migrated to a new authenticated API.
+	ct := resp.Header.Get("Content-Type")
+	if len(ct) >= 9 && ct[:9] == "text/html" {
+		return "", fmt.Errorf("PulsePoint API unavailable (endpoint changed)")
+	}
+
 	var result psapResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return "", err

@@ -2,6 +2,7 @@ package data
 
 import (
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -13,7 +14,13 @@ func FetchAllIncidents(lat, lng float64, city string) ([]Incident, []string) {
 		err       error
 	}
 
-	ch := make(chan result, 2)
+	isHouston := strings.EqualFold(strings.TrimSpace(city), "houston")
+	sources := 2
+	if isHouston {
+		sources = 3
+	}
+
+	ch := make(chan result, sources)
 
 	// Fetch PulsePoint (fire/EMS).
 	go func() {
@@ -27,10 +34,18 @@ func FetchAllIncidents(lat, lng float64, city string) ([]Incident, []string) {
 		ch <- result{incidents, "socrata", err}
 	}()
 
+	// Houston combined FD/PD feed (replaces both for Houston).
+	if isHouston {
+		go func() {
+			incidents, err := FetchHoustonIncidents()
+			ch <- result{incidents, "houston", err}
+		}()
+	}
+
 	var all []Incident
 	var warnings []string
 
-	for i := 0; i < 2; i++ {
+	for i := 0; i < sources; i++ {
 		r := <-ch
 		if r.err != nil {
 			warnings = append(warnings, r.source+": "+r.err.Error())

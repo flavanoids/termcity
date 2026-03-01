@@ -42,6 +42,47 @@ type GeoLocation struct {
 	State       string
 }
 
+// GeocodeAddress resolves a street address to lat/lng via Nominatim structured search.
+// Returns 0, 0, nil if no results found (not an error).
+func GeocodeAddress(street, city, state string) (float64, float64, error) {
+	geocodeRateLimit()
+
+	params := url.Values{}
+	params.Set("street", street)
+	params.Set("city", city)
+	params.Set("state", state)
+	params.Set("countrycodes", "us")
+	params.Set("format", "json")
+	params.Set("limit", "1")
+
+	reqURL := nominatimURL + "?" + params.Encode()
+	req, err := http.NewRequest("GET", reqURL, nil)
+	if err != nil {
+		return 0, 0, err
+	}
+	req.Header.Set("User-Agent", nominatimUserAgent)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, 0, fmt.Errorf("geocode address: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var results []nominatimResult
+	if err := json.NewDecoder(resp.Body).Decode(&results); err != nil {
+		return 0, 0, fmt.Errorf("geocode address decode: %w", err)
+	}
+	if len(results) == 0 {
+		return 0, 0, nil
+	}
+
+	var lat, lng float64
+	fmt.Sscanf(results[0].Lat, "%f", &lat)
+	fmt.Sscanf(results[0].Lon, "%f", &lng)
+	return lat, lng, nil
+}
+
 // GeocodeZip converts a US zip code to lat/lng via Nominatim.
 func GeocodeZip(zip string) (*GeoLocation, error) {
 	geocodeRateLimit()
