@@ -68,6 +68,7 @@ func NewMapViewModel(zip string, lat, lng float64, city string) MapViewModel {
 		lng:          lng,
 		city:         city,
 		zoom:         14,
+		tileSource:   tilemap.SourceDark,
 		tileCache:    make(map[tilemap.TileKey][]string),
 		loading:      true,
 		showSidebar:  true,
