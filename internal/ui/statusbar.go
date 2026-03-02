@@ -50,7 +50,8 @@ func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Inciden
 	parts = append(parts, counts)
 
 	// Help hint.
-	helpPart := StatusBarKeyStyle.Render("[?]") + HelpStyle.Render("Help") +
+	helpPart := StatusBarKeyStyle.Render("[Enter]") + HelpStyle.Render("Detail") +
+		"  " + StatusBarKeyStyle.Render("[?]") + HelpStyle.Render("Help") +
 		"  " + StatusBarKeyStyle.Render("[q]") + HelpStyle.Render("Quit")
 	parts = append(parts, helpPart)
 
@@ -69,7 +70,7 @@ func RenderHelpOverlay(width, height int) string {
 		fmt.Sprintf("%-12s %s", "+/-", "Zoom in/out"),
 		fmt.Sprintf("%-12s %s", "↑↓←→", "Pan map"),
 		fmt.Sprintf("%-12s %s", "Tab", "Toggle sidebar"),
-		fmt.Sprintf("%-12s %s", "Enter", "View incident detail"),
+		fmt.Sprintf("%-12s %s", "Enter", "Toggle incident detail"),
 		fmt.Sprintf("%-12s %s", "j/k", "Navigate incident list"),
 		fmt.Sprintf("%-12s %s", "r", "Refresh incidents"),
 		fmt.Sprintf("%-12s %s", "?", "Toggle this help"),

@@ -55,9 +55,14 @@ func RenderSidebar(incidents []data.Incident, selected int, height int) string {
 	for i := scrollOffset; i < len(incidents) && renderedLines < height; i++ {
 		inc := incidents[i]
 
+		numStr := fmt.Sprintf("%d.", i+1)
 		symbol := incidentSymbol(inc.Type)
-		title := truncate(inc.Title, SidebarWidth-4)
-		line1 := fmt.Sprintf("%s %-*s", symbol, SidebarWidth-4, title)
+		maxTitle := SidebarWidth - 4 - len(numStr) - 1
+		if maxTitle < 4 {
+			maxTitle = 4
+		}
+		title := truncate(inc.Title, maxTitle)
+		line1 := fmt.Sprintf("%s %s %-*s", symbol, numStr, maxTitle, title)
 
 		addr := truncate(inc.Address, SidebarWidth-2)
 		line2 := fmt.Sprintf("  %-*s", SidebarWidth-2, addr)

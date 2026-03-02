@@ -1,6 +1,7 @@
 package model
 
 import (
+	"strconv"
 	"strings"
 	"termcity/internal/data"
 	"termcity/internal/tilemap"
@@ -51,6 +52,7 @@ type MapViewModel struct {
 	selectedIncident int
 	showSidebar      bool
 	showHelp         bool
+	showDetail       bool
 
 	// Error state
 	err string
@@ -178,9 +180,27 @@ func (m MapViewModel) Update(msg tea.Msg) (MapViewModel, tea.Cmd) {
 }
 
 func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
+	// When detail overlay is visible, only allow closing it.
+	if m.showDetail {
+		switch msg.String() {
+		case "esc", "enter":
+			m.showDetail = false
+			return m, nil
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		}
+		return m, nil
+	}
+
 	switch msg.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
+
+	case "enter":
+		if len(m.incidents) > 0 {
+			m.showDetail = true
+		}
+		return m, nil
 
 	case "+", "=":
 		m.zoom = tilemap.ClampZoom(m.zoom + 1)
@@ -359,6 +379,10 @@ func (m MapViewModel) View() string {
 	statusBar := ui.RenderStatusBar(m.zip, m.nextRefresh, m.incidents, m.width, m.loading)
 	result := view + "\n" + statusBar
 
+	if m.showDetail && len(m.incidents) > 0 && m.selectedIncident < len(m.incidents) {
+		result = overlayDetail(result, m.incidents[m.selectedIncident], m.width, m.height)
+	}
+
 	if m.showHelp {
 		result = overlayHelp(result, m.width, m.height)
 	}
@@ -412,15 +436,41 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 		}
 	}
 
-	// Overlay incident markers.
-	pulseChar := pulseChars[m.frame]
-	for _, inc := range m.incidents {
+	// Overlay numbered incident markers (3+ cells wide, 2 rows tall).
+	for i, inc := range m.incidents {
 		incPX, incPY := tilemap.LatLngToPixelCoord(inc.Lat, inc.Lng, m.zoom)
 		col, row := tilemap.PixelToCell(incPX, incPY, originPX, originPY)
-		if col < 0 || col >= cols || row < 0 || row >= rows {
-			continue
+
+		numStr := strconv.Itoa(i + 1)
+		markerW := len(numStr) + 2 // padding on each side
+		startCol := col - markerW/2
+		colorHex := inc.Type.Color()
+
+		// Top row: solid colored background.
+		if row-1 >= 0 && row-1 < rows {
+			for dx := 0; dx < markerW; dx++ {
+				gc := startCol + dx
+				if gc >= 0 && gc < cols {
+					grid[row-1][gc] = tilemap.SolidBgCell(colorHex)
+				}
+			}
 		}
-		grid[row][col] = tilemap.ColoredCell(pulseChar, inc.Type.Color(), 0, 0, 0)
+
+		// Main row: padding + number digits + padding.
+		if row >= 0 && row < rows {
+			for dx := 0; dx < markerW; dx++ {
+				gc := startCol + dx
+				if gc < 0 || gc >= cols {
+					continue
+				}
+				digitIdx := dx - 1
+				if digitIdx >= 0 && digitIdx < len(numStr) {
+					grid[row][gc] = tilemap.NumberCell(rune(numStr[digitIdx]), colorHex)
+				} else {
+					grid[row][gc] = tilemap.SolidBgCell(colorHex)
+				}
+			}
+		}
 	}
 
 	var sb strings.Builder
@@ -456,6 +506,26 @@ func splitANSICells(row string, expectedCells int) []string {
 // panDelta returns degrees to pan per keypress at the given zoom level.
 func panDelta(zoom int) float64 {
 	return 0.15 / float64(zoom)
+}
+
+// overlayDetail overlays the incident detail box on the existing rendered output.
+func overlayDetail(base string, inc data.Incident, width, height int) string {
+	detailOverlay := ui.RenderDetailOverlay(inc, width, height)
+	baseLines := strings.Split(base, "\n")
+	detailLines := strings.Split(detailOverlay, "\n")
+
+	out := make([]string, len(baseLines))
+	copy(out, baseLines)
+
+	for i, line := range detailLines {
+		if i >= len(out) {
+			break
+		}
+		if strings.TrimSpace(line) != "" {
+			out[i] = line
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // overlayHelp overlays the help box on the existing rendered output.

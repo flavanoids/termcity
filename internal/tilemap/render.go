@@ -108,3 +108,16 @@ func ColoredCell(ch rune, fgHex string, bgR, bgG, bgB uint8) string {
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm%c\x1b[0m",
 		c.R, c.G, c.B, bgR, bgG, bgB, ch)
 }
+
+// SolidBgCell returns an ANSI string for a space with a solid colored background.
+func SolidBgCell(colorHex string) string {
+	c := ParseHexColor(colorHex)
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm \x1b[0m", c.R, c.G, c.B)
+}
+
+// NumberCell returns an ANSI string for a white digit on a colored background.
+func NumberCell(ch rune, colorHex string) string {
+	c := ParseHexColor(colorHex)
+	return fmt.Sprintf("\x1b[1m\x1b[38;2;255;255;255m\x1b[48;2;%d;%d;%dm%c\x1b[0m",
+		c.R, c.G, c.B, ch)
+}
