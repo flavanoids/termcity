@@ -38,6 +38,9 @@ type MapViewModel struct {
 	width  int
 	height int
 
+	// Map style
+	tileSource tilemap.TileSource
+
 	// Map state — safe to access without mutex (single-goroutine model)
 	tileCache   map[tilemap.TileKey][]string
 	incidents   []data.Incident
@@ -109,15 +112,15 @@ func refreshCmd() tea.Cmd {
 	})
 }
 
-func fetchTileCmd(z, x, y int) tea.Cmd {
+func fetchTileCmd(src tilemap.TileSource, z, x, y int) tea.Cmd {
 	return func() tea.Msg {
-		pngData, err := tilemap.FetchTile(z, x, y)
+		pngData, err := tilemap.FetchTile(src, z, x, y)
 		if err != nil {
-			return TileReadyMsg{Key: tilemap.TileKey{Z: z, X: x, Y: y}, Err: err}
+			return TileReadyMsg{Key: tilemap.TileKey{Z: z, X: x, Y: y, Source: src}, Err: err}
 		}
 		rows, err := tilemap.RenderTile(pngData)
 		return TileReadyMsg{
-			Key:  tilemap.TileKey{Z: z, X: x, Y: y},
+			Key:  tilemap.TileKey{Z: z, X: x, Y: y, Source: src},
 			Rows: rows,
 			Err:  err,
 		}
@@ -264,6 +267,11 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 		m.showHelp = false
 		return m, nil
 
+	case "m":
+		m.tileSource = m.tileSource.Next()
+		m.tileCache = make(map[tilemap.TileKey][]string)
+		return m, m.fetchVisibleTiles()
+
 	case "r":
 		m.loading = true
 		return m, fetchIncidentsCmd(m.lat, m.lng, m.city)
@@ -306,9 +314,9 @@ func (m MapViewModel) fetchVisibleTiles() tea.Cmd {
 	var cmds []tea.Cmd
 	for ty := minTY; ty <= maxTY; ty++ {
 		for tx := minTX; tx <= maxTX; tx++ {
-			key := tilemap.TileKey{Z: m.zoom, X: tx, Y: ty}
+			key := tilemap.TileKey{Z: m.zoom, X: tx, Y: ty, Source: m.tileSource}
 			if _, cached := m.tileCache[key]; !cached {
-				cmds = append(cmds, fetchTileCmd(m.zoom, tx, ty))
+				cmds = append(cmds, fetchTileCmd(m.tileSource, m.zoom, tx, ty))
 			}
 		}
 	}
@@ -376,7 +384,7 @@ func (m MapViewModel) View() string {
 		view = mapContent
 	}
 
-	statusBar := ui.RenderStatusBar(m.zip, m.nextRefresh, m.incidents, m.width, m.loading)
+	statusBar := ui.RenderStatusBar(m.zip, m.nextRefresh, m.incidents, m.width, m.loading, m.tileSource.Name())
 	result := view + "\n" + statusBar
 
 	if m.showDetail && len(m.incidents) > 0 && m.selectedIncident < len(m.incidents) {
@@ -407,7 +415,7 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 
 	for ty := minTY; ty <= maxTY; ty++ {
 		for tx := minTX; tx <= maxTX; tx++ {
-			key := tilemap.TileKey{Z: m.zoom, X: tx, Y: ty}
+			key := tilemap.TileKey{Z: m.zoom, X: tx, Y: ty, Source: m.tileSource}
 			tileRows, ok := m.tileCache[key]
 			if !ok {
 				continue

@@ -19,19 +19,30 @@ func cacheDir() (string, error) {
 	return dir, nil
 }
 
+func sourceCachePrefix(src TileSource) string {
+	switch src {
+	case SourceDark:
+		return "dark"
+	case SourceLight:
+		return "light"
+	default:
+		return "osm"
+	}
+}
+
 // tileCachePath returns the file path for a cached tile.
-func tileCachePath(z, x, y int) (string, error) {
+func tileCachePath(src TileSource, z, x, y int) (string, error) {
 	dir, err := cacheDir()
 	if err != nil {
 		return "", err
 	}
-	filename := fmt.Sprintf("%d_%d_%d.png", z, x, y)
+	filename := fmt.Sprintf("%s_%d_%d_%d.png", sourceCachePrefix(src), z, x, y)
 	return filepath.Join(dir, filename), nil
 }
 
 // ReadCachedTile reads a tile from disk cache. Returns nil, nil if not cached.
-func ReadCachedTile(z, x, y int) ([]byte, error) {
-	path, err := tileCachePath(z, x, y)
+func ReadCachedTile(src TileSource, z, x, y int) ([]byte, error) {
+	path, err := tileCachePath(src, z, x, y)
 	if err != nil {
 		return nil, err
 	}
@@ -43,8 +54,8 @@ func ReadCachedTile(z, x, y int) ([]byte, error) {
 }
 
 // WriteCachedTile writes tile data to disk cache.
-func WriteCachedTile(z, x, y int, data []byte) error {
-	path, err := tileCachePath(z, x, y)
+func WriteCachedTile(src TileSource, z, x, y int, data []byte) error {
+	path, err := tileCachePath(src, z, x, y)
 	if err != nil {
 		return err
 	}
