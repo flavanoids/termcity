@@ -14,10 +14,18 @@ const SidebarWidth = 26
 // RenderSidebar renders the incident list sidebar.
 // height is the available height (excluding status bar).
 // selected is the index of the currently highlighted incident.
-func RenderSidebar(incidents []data.Incident, selected int, height int) string {
+func RenderSidebar(incidents []data.Incident, selected int, height int, focused bool) string {
 	var sb strings.Builder
 
-	title := SidebarTitleStyle.Width(SidebarWidth).Render("ACTIVE INCIDENTS")
+	titleText := "ACTIVE INCIDENTS"
+	if focused {
+		titleText = "▸ ACTIVE INCIDENTS"
+	}
+	titleStyle := SidebarTitleStyle
+	if focused {
+		titleStyle = titleStyle.Background(ColorBorder)
+	}
+	title := titleStyle.Width(SidebarWidth).Render(titleText)
 	sb.WriteString(title)
 	sb.WriteString("\n")
 
