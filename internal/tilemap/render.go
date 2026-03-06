@@ -6,15 +6,16 @@ import (
 	"image"
 	"image/color"
 	_ "image/png"
+	"strconv"
 )
 
 // upperHalfBlock is U+2580 "▀" — upper half block character.
 const upperHalfBlock = "▀"
 
-// RenderTile decodes a PNG tile and returns terminal rows as ANSI strings.
-// Each terminal row encodes 2 pixel rows using the half-block technique.
-// Returns 128 strings (for a 256px tall tile).
-func RenderTile(pngData []byte) ([]string, error) {
+// RenderTile decodes a PNG tile and returns a grid of pre-split ANSI cell strings.
+// Each row contains TileSize cells; each cell encodes 2 vertically-stacked pixels
+// using the half-block technique. Returns TileSize/2 rows (128 for a 256px tile).
+func RenderTile(pngData []byte) ([][]string, error) {
 	img, _, err := image.Decode(bytes.NewReader(pngData))
 	if err != nil {
 		return nil, fmt.Errorf("decoding tile PNG: %w", err)
@@ -29,31 +30,44 @@ func RenderTile(pngData []byte) ([]string, error) {
 		h--
 	}
 
-	rows := make([]string, h/2)
+	rows := make([][]string, h/2)
+	buf := make([]byte, 0, 40) // reused per cell
 	for row := 0; row < h/2; row++ {
-		line := make([]byte, 0, w*30)
+		cells := make([]string, w)
 		for col := 0; col < w; col++ {
 			topPx := img.At(bounds.Min.X+col, bounds.Min.Y+row*2)
 			botPx := img.At(bounds.Min.X+col, bounds.Min.Y+row*2+1)
 			tr, tg, tb, _ := topPx.RGBA()
 			br, bg, bb, _ := botPx.RGBA()
 			// RGBA returns 16-bit values; shift to 8-bit.
-			line = appendHalfBlock(line, uint8(tr>>8), uint8(tg>>8), uint8(tb>>8),
+			buf = buf[:0]
+			buf = appendHalfBlock(buf, uint8(tr>>8), uint8(tg>>8), uint8(tb>>8),
 				uint8(br>>8), uint8(bg>>8), uint8(bb>>8))
+			cells[col] = string(buf)
 		}
-		// Reset attributes at end of row.
-		line = append(line, "\x1b[0m"...)
-		rows[row] = string(line)
+		rows[row] = cells
 	}
 	return rows, nil
 }
 
 // appendHalfBlock appends an ANSI-colored half-block character to buf.
 // fg = top pixel (foreground), bg = bottom pixel (background).
+// Uses strconv.AppendUint to avoid fmt.Sprintf allocations in this hot path.
 func appendHalfBlock(buf []byte, fr, fg, fb, br, bg, bb uint8) []byte {
-	// Set foreground (top pixel) and background (bottom pixel) in 24-bit color.
-	buf = append(buf, fmt.Sprintf("\x1b[38;2;%d;%d;%dm\x1b[48;2;%d;%d;%dm%s",
-		fr, fg, fb, br, bg, bb, upperHalfBlock)...)
+	buf = append(buf, "\x1b[38;2;"...)
+	buf = strconv.AppendUint(buf, uint64(fr), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendUint(buf, uint64(fg), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendUint(buf, uint64(fb), 10)
+	buf = append(buf, "m\x1b[48;2;"...)
+	buf = strconv.AppendUint(buf, uint64(br), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendUint(buf, uint64(bg), 10)
+	buf = append(buf, ';')
+	buf = strconv.AppendUint(buf, uint64(bb), 10)
+	buf = append(buf, 'm')
+	buf = append(buf, upperHalfBlock...)
 	return buf
 }
 

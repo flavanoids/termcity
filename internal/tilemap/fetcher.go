@@ -55,23 +55,24 @@ func tileURL(src TileSource, z, x, y int) string {
 	}
 }
 
-// rateLimiter enforces max 2 requests per second for tile fetching.
+// OSM rate limiter: max 2 req/s per ToS.
 var (
-	rateMu      sync.Mutex
-	lastRequest time.Time
-	minInterval = 500 * time.Millisecond // 2 req/s
+	osmRateMu      sync.Mutex
+	osmLastRequest time.Time
+	osmMinInterval = 500 * time.Millisecond
 )
 
-func rateLimit() {
-	rateMu.Lock()
-	defer rateMu.Unlock()
-	now := time.Now()
-	elapsed := now.Sub(lastRequest)
-	if elapsed < minInterval {
-		time.Sleep(minInterval - elapsed)
+func osmRateLimit() {
+	osmRateMu.Lock()
+	defer osmRateMu.Unlock()
+	if elapsed := time.Since(osmLastRequest); elapsed < osmMinInterval {
+		time.Sleep(osmMinInterval - elapsed)
 	}
-	lastRequest = time.Now()
+	osmLastRequest = time.Now()
 }
+
+// CartoDB semaphore: allow up to 3 concurrent requests (separate servers from OSM).
+var cartoSem = make(chan struct{}, 3)
 
 var httpClient = &http.Client{
 	Timeout: 10 * time.Second,
@@ -79,14 +80,20 @@ var httpClient = &http.Client{
 
 // FetchTile fetches a tile PNG from cache or the given source. Returns raw PNG bytes.
 func FetchTile(src TileSource, z, x, y int) ([]byte, error) {
-	// Try cache first.
+	// Try disk cache first.
 	data, err := ReadCachedTile(src, z, x, y)
 	if err == nil && data != nil {
 		return data, nil
 	}
 
-	// Rate limit before network request.
-	rateLimit()
+	// Apply per-source rate limiting / concurrency control before network request.
+	switch src {
+	case SourceOSM:
+		osmRateLimit()
+	default: // CartoDB Dark / Light
+		cartoSem <- struct{}{}
+		defer func() { <-cartoSem }()
+	}
 
 	url := tileURL(src, z, x, y)
 	req, err := http.NewRequest("GET", url, nil)

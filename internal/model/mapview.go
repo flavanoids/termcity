@@ -42,7 +42,7 @@ type MapViewModel struct {
 	tileSource tilemap.TileSource
 
 	// Map state — safe to access without mutex (single-goroutine model)
-	tileCache   map[tilemap.TileKey][]string
+	tileCache   map[tilemap.TileKey][][]string
 	incidents   []data.Incident
 	warnings    []string
 	loading     bool
@@ -69,7 +69,7 @@ func NewMapViewModel(zip string, lat, lng float64, city string) MapViewModel {
 		city:         city,
 		zoom:         14,
 		tileSource:   tilemap.SourceDark,
-		tileCache:    make(map[tilemap.TileKey][]string),
+		tileCache:    make(map[tilemap.TileKey][][]string),
 		loading:      true,
 		showSidebar:  true,
 		nextRefresh:  time.Now().Add(60 * time.Second),
@@ -83,7 +83,7 @@ func NewMapViewModel(zip string, lat, lng float64, city string) MapViewModel {
 // TileReadyMsg signals a tile has been rendered.
 type TileReadyMsg struct {
 	Key  tilemap.TileKey
-	Rows []string
+	Rows [][]string
 	Err  error
 }
 
@@ -115,16 +115,20 @@ func refreshCmd() tea.Cmd {
 
 func fetchTileCmd(src tilemap.TileSource, z, x, y int) tea.Cmd {
 	return func() tea.Msg {
+		key := tilemap.TileKey{Z: z, X: x, Y: y, Source: src}
+		// Check in-memory rendered cache first (no disk I/O, no PNG decode).
+		if rows, ok := tilemap.GlobalMemCache.Get(key); ok {
+			return TileReadyMsg{Key: key, Rows: rows}
+		}
 		pngData, err := tilemap.FetchTile(src, z, x, y)
 		if err != nil {
-			return TileReadyMsg{Key: tilemap.TileKey{Z: z, X: x, Y: y, Source: src}, Err: err}
+			return TileReadyMsg{Key: key, Err: err}
 		}
 		rows, err := tilemap.RenderTile(pngData)
-		return TileReadyMsg{
-			Key:  tilemap.TileKey{Z: z, X: x, Y: y, Source: src},
-			Rows: rows,
-			Err:  err,
+		if err == nil {
+			tilemap.GlobalMemCache.Put(key, rows)
 		}
+		return TileReadyMsg{Key: key, Rows: rows, Err: err}
 	}
 }
 
@@ -208,12 +212,12 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 
 	case "+", "=":
 		m.zoom = tilemap.ClampZoom(m.zoom + 1)
-		m.tileCache = make(map[tilemap.TileKey][]string)
+		m.tileCache = make(map[tilemap.TileKey][][]string)
 		return m, m.fetchVisibleTiles()
 
 	case "-":
 		m.zoom = tilemap.ClampZoom(m.zoom - 1)
-		m.tileCache = make(map[tilemap.TileKey][]string)
+		m.tileCache = make(map[tilemap.TileKey][][]string)
 		return m, m.fetchVisibleTiles()
 
 	case "up":
@@ -270,7 +274,7 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 
 	case "m":
 		m.tileSource = m.tileSource.Next()
-		m.tileCache = make(map[tilemap.TileKey][]string)
+		m.tileCache = make(map[tilemap.TileKey][][]string)
 		return m, m.fetchVisibleTiles()
 
 	case "r":
@@ -289,10 +293,10 @@ func (m MapViewModel) shouldRefetchIncidents() bool {
 	return dlat*dlat+dlng*dlng > incidentFetchThreshold*incidentFetchThreshold
 }
 
-// afterPan clears the tile cache, fetches visible tiles, and conditionally
-// re-fetches incidents if the map center has moved past the threshold.
+// afterPan fetches visible tiles and conditionally re-fetches incidents if the
+// map center has moved past the threshold. Tile cache is NOT wiped — cached tiles
+// from before the pan remain valid and reusable.
 func (m MapViewModel) afterPan() (MapViewModel, tea.Cmd) {
-	m.tileCache = make(map[tilemap.TileKey][]string)
 	cmds := []tea.Cmd{m.fetchVisibleTiles()}
 	if m.shouldRefetchIncidents() {
 		m.loading = true
@@ -303,7 +307,8 @@ func (m MapViewModel) afterPan() (MapViewModel, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// fetchVisibleTiles returns commands to fetch all tiles currently in view.
+// fetchVisibleTiles returns commands to fetch all tiles currently in view,
+// plus a 1-tile prefetch ring around the viewport.
 func (m MapViewModel) fetchVisibleTiles() tea.Cmd {
 	if m.width == 0 || m.height == 0 {
 		return nil
@@ -311,8 +316,11 @@ func (m MapViewModel) fetchVisibleTiles() tea.Cmd {
 
 	mapCols, mapRows := m.mapDimensions()
 	minTX, minTY, maxTX, maxTY := tilemap.TilesForView(m.lat, m.lng, m.zoom, mapCols, mapRows)
+	maxTile := (1 << uint(m.zoom)) - 1
 
 	var cmds []tea.Cmd
+
+	// Visible tiles first.
 	for ty := minTY; ty <= maxTY; ty++ {
 		for tx := minTX; tx <= maxTX; tx++ {
 			key := tilemap.TileKey{Z: m.zoom, X: tx, Y: ty, Source: m.tileSource}
@@ -321,6 +329,27 @@ func (m MapViewModel) fetchVisibleTiles() tea.Cmd {
 			}
 		}
 	}
+
+	// Prefetch 1-tile border ring outside the visible area.
+	for ty := minTY - 1; ty <= maxTY+1; ty++ {
+		for tx := minTX - 1; tx <= maxTX+1; tx++ {
+			if tx < 0 || ty < 0 || tx > maxTile || ty > maxTile {
+				continue
+			}
+			if ty >= minTY && ty <= maxTY && tx >= minTX && tx <= maxTX {
+				continue // already queued above
+			}
+			key := tilemap.TileKey{Z: m.zoom, X: tx, Y: ty, Source: m.tileSource}
+			if _, cached := m.tileCache[key]; cached {
+				continue
+			}
+			if _, ok := tilemap.GlobalMemCache.Get(key); ok {
+				continue // already rendered in memory; will be a fast cmd when needed
+			}
+			cmds = append(cmds, fetchTileCmd(m.tileSource, m.zoom, tx, ty))
+		}
+	}
+
 	return tea.Batch(cmds...)
 }
 
@@ -427,13 +456,11 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 			tileOffsetCol := tilePX - originPX
 			tileOffsetRow := (tilePY - originPY) / 2
 
-			for tileRow, rowStr := range tileRows {
+			for tileRow, cells := range tileRows {
 				gridRow := tileOffsetRow + tileRow
 				if gridRow < 0 || gridRow >= len(grid) {
 					continue
 				}
-
-				cells := splitANSICells(rowStr, tilemap.TileSize)
 				for tileCol, cell := range cells {
 					gridCol := tileOffsetCol + tileCol
 					if gridCol < 0 || gridCol >= mapPixelW {
@@ -493,23 +520,6 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 		}
 	}
 	return sb.String()
-}
-
-// splitANSICells splits an ANSI tile row into per-cell strings by scanning for ▀.
-func splitANSICells(row string, expectedCells int) []string {
-	cells := make([]string, 0, expectedCells)
-	runes := []rune(row)
-	start := 0
-	for i := 0; i < len(runes); i++ {
-		if runes[i] == '▀' {
-			cells = append(cells, string(runes[start:i+1]))
-			start = i + 1
-		}
-	}
-	for len(cells) < expectedCells {
-		cells = append(cells, " ")
-	}
-	return cells
 }
 
 // panDelta returns degrees to pan per keypress at the given zoom level.
