@@ -10,7 +10,7 @@ import (
 )
 
 // RenderStatusBar renders the bottom status bar.
-func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Incident, width int, loading bool, mapStyle string) string {
+func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Incident, width int, loading bool, mapStyle string, numberBuf string) string {
 	// Count by type.
 	var fires, police, ems int
 	for _, inc := range incidents {
@@ -52,8 +52,14 @@ func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Inciden
 	// Map style.
 	parts = append(parts, StatusBarKeyStyle.Render("[m]")+HelpStyle.Render(mapStyle))
 
+	// Number input feedback.
+	if numberBuf != "" {
+		parts = append(parts, StatusBarKeyStyle.Render("#")+StatusBarStyle.Render(numberBuf+"…"))
+	}
+
 	// Help hint.
-	helpPart := StatusBarKeyStyle.Render("[Enter]") + HelpStyle.Render("Detail") +
+	helpPart := StatusBarKeyStyle.Render("[Tab]") + HelpStyle.Render("Focus") +
+		"  " + StatusBarKeyStyle.Render("[1-9]") + HelpStyle.Render("Go to") +
 		"  " + StatusBarKeyStyle.Render("[?]") + HelpStyle.Render("Help") +
 		"  " + StatusBarKeyStyle.Render("[q]") + HelpStyle.Render("Quit")
 	parts = append(parts, helpPart)
@@ -70,15 +76,23 @@ func RenderHelpOverlay(width, height int) string {
 	lines := []string{
 		lipgloss.NewStyle().Bold(true).Foreground(ColorHighlight).Render("TermCity Help"),
 		"",
-		fmt.Sprintf("%-12s %s", "+/-", "Zoom in/out"),
-		fmt.Sprintf("%-12s %s", "↑↓←→", "Pan map"),
-		fmt.Sprintf("%-12s %s", "Tab", "Toggle sidebar"),
-		fmt.Sprintf("%-12s %s", "Enter", "Toggle incident detail"),
-		fmt.Sprintf("%-12s %s", "j/k", "Navigate incident list"),
-		fmt.Sprintf("%-12s %s", "r", "Refresh incidents"),
-		fmt.Sprintf("%-12s %s", "m", "Cycle map style"),
-		fmt.Sprintf("%-12s %s", "?", "Toggle this help"),
-		fmt.Sprintf("%-12s %s", "q / Ctrl+C", "Quit"),
+		lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render("Map (default focus)"),
+		fmt.Sprintf("  %-10s %s", "↑↓←→", "Pan map"),
+		fmt.Sprintf("  %-10s %s", "+/-", "Zoom in/out"),
+		fmt.Sprintf("  %-10s %s", "m", "Cycle map style"),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render("Events sidebar (Tab to focus)"),
+		fmt.Sprintf("  %-10s %s", "↑↓", "Navigate event list"),
+		fmt.Sprintf("  %-10s %s", "Enter", "Show event detail"),
+		fmt.Sprintf("  %-10s %s", "Esc", "Return to map"),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render("Global"),
+		fmt.Sprintf("  %-10s %s", "1-9", "Jump to event # (detail)"),
+		fmt.Sprintf("  %-10s %s", "j/k", "Navigate event list"),
+		fmt.Sprintf("  %-10s %s", "r", "Refresh incidents"),
+		fmt.Sprintf("  %-10s %s", "Tab", "Switch focus"),
+		fmt.Sprintf("  %-10s %s", "?", "Toggle this help"),
+		fmt.Sprintf("  %-10s %s", "q / Ctrl+C", "Quit"),
 		"",
 		HelpStyle.Render("Press ? or Esc to close"),
 	}

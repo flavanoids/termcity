@@ -12,12 +12,24 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// FocusArea indicates which panel has keyboard focus.
+type FocusArea int
+
+const (
+	FocusMap     FocusArea = iota
+	FocusSidebar
+)
+
 // pulseChars is the animation sequence for incident markers.
 var pulseChars = []rune{' ', '·', '•', '●', '◉', '●', '•', '·'}
 
 // incidentFetchThreshold is the minimum movement (degrees) before re-fetching incidents on pan.
 // ~0.05° ≈ 5.5 km at the equator.
 const incidentFetchThreshold = 0.05
+
+// numberBufTimeout is how long to wait after the last digit key before
+// auto-opening the detail overlay for the typed incident number.
+const numberBufTimeout = 800 * time.Millisecond
 
 // MapViewModel manages the main map + sidebar + statusbar screen.
 // NOTE: No sync.Mutex here — bubbletea Update/View run on a single goroutine.
@@ -52,10 +64,14 @@ type MapViewModel struct {
 	frame int
 
 	// UI state
+	focus            FocusArea
 	selectedIncident int
-	showSidebar      bool
 	showHelp         bool
 	showDetail       bool
+
+	// Number-key quick-select buffer (e.g. press "1" "2" → incident #12).
+	numberBuf   string
+	numberBufAt time.Time
 
 	// Error state
 	err string
@@ -71,7 +87,7 @@ func NewMapViewModel(zip string, lat, lng float64, city string) MapViewModel {
 		tileSource:   tilemap.SourceDark,
 		tileCache:    make(map[tilemap.TileKey][][]string),
 		loading:      true,
-		showSidebar:  true,
+		focus:        FocusMap,
 		nextRefresh:  time.Now().Add(60 * time.Second),
 		lastFetchLat: lat,
 		lastFetchLng: lng,
@@ -178,6 +194,15 @@ func (m MapViewModel) Update(msg tea.Msg) (MapViewModel, tea.Cmd) {
 
 	case TickMsg:
 		m.frame = (m.frame + 1) % len(pulseChars)
+		// Auto-open detail after number-key timeout.
+		if m.numberBuf != "" && time.Since(m.numberBufAt) > numberBufTimeout {
+			num, err := strconv.Atoi(m.numberBuf)
+			if err == nil && num >= 1 && num <= len(m.incidents) {
+				m.selectedIncident = num - 1
+				m.showDetail = true
+			}
+			m.numberBuf = ""
+		}
 		return m, tickCmd()
 
 	case tea.KeyMsg:
@@ -200,11 +225,28 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 		return m, nil
 	}
 
-	switch msg.String() {
+	key := msg.String()
+
+	// Digit keys: quick-select an incident by its displayed number.
+	if len(key) == 1 && key[0] >= '0' && key[0] <= '9' {
+		return m.handleDigit(key)
+	}
+
+	switch key {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
+	case "tab":
+		// Toggle focus between map and sidebar.
+		if m.focus == FocusMap {
+			m.focus = FocusSidebar
+		} else {
+			m.focus = FocusMap
+		}
+		return m, nil
+
 	case "enter":
+		m.numberBuf = ""
 		if len(m.incidents) > 0 {
 			m.showDetail = true
 		}
@@ -221,23 +263,42 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 		return m, m.fetchVisibleTiles()
 
 	case "up":
+		if m.focus == FocusSidebar {
+			m.selectedIncident--
+			if m.selectedIncident < 0 {
+				m.selectedIncident = 0
+			}
+			return m, nil
+		}
 		m.lat += panDelta(m.zoom)
 		return m.afterPan()
 
 	case "down":
+		if m.focus == FocusSidebar {
+			m.selectedIncident++
+			if m.selectedIncident >= len(m.incidents) {
+				m.selectedIncident = len(m.incidents) - 1
+			}
+			return m, nil
+		}
 		m.lat -= panDelta(m.zoom)
 		return m.afterPan()
 
 	case "left":
+		if m.focus == FocusSidebar {
+			return m, nil
+		}
 		m.lng -= panDelta(m.zoom)
 		return m.afterPan()
 
 	case "right":
+		if m.focus == FocusSidebar {
+			return m, nil
+		}
 		m.lng += panDelta(m.zoom)
 		return m.afterPan()
 
 	case "j":
-		// Navigate incident list.
 		m.selectedIncident++
 		if m.selectedIncident >= len(m.incidents) {
 			m.selectedIncident = len(m.incidents) - 1
@@ -245,7 +306,6 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 		return m, nil
 
 	case "k":
-		// Navigate incident list.
 		m.selectedIncident--
 		if m.selectedIncident < 0 {
 			m.selectedIncident = 0
@@ -260,15 +320,15 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 		m.lng += panDelta(m.zoom)
 		return m.afterPan()
 
-	case "tab":
-		m.showSidebar = !m.showSidebar
-		return m, m.fetchVisibleTiles()
-
 	case "?":
 		m.showHelp = !m.showHelp
 		return m, nil
 
 	case "esc":
+		if m.focus == FocusSidebar {
+			m.focus = FocusMap
+			return m, nil
+		}
 		m.showHelp = false
 		return m, nil
 
@@ -282,6 +342,28 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 		return m, fetchIncidentsCmd(m.lat, m.lng, m.city)
 	}
 
+	return m, nil
+}
+
+// handleDigit accumulates digit presses into numberBuf. After a short
+// timeout (checked in TickMsg) the corresponding incident detail is shown.
+func (m MapViewModel) handleDigit(digit string) (MapViewModel, tea.Cmd) {
+	// Reset buffer if too much time has passed since last digit.
+	if time.Since(m.numberBufAt) > 1*time.Second {
+		m.numberBuf = ""
+	}
+	// Don't start a number with 0.
+	if digit == "0" && m.numberBuf == "" {
+		return m, nil
+	}
+	m.numberBuf += digit
+	m.numberBufAt = time.Now()
+
+	// Update selection immediately so the sidebar highlights the target.
+	num, err := strconv.Atoi(m.numberBuf)
+	if err == nil && num >= 1 && num <= len(m.incidents) {
+		m.selectedIncident = num - 1
+	}
 	return m, nil
 }
 
@@ -354,11 +436,9 @@ func (m MapViewModel) fetchVisibleTiles() tea.Cmd {
 }
 
 // mapDimensions returns the width/height of the map area in terminal cells.
+// The sidebar is always visible, so its width is always subtracted.
 func (m MapViewModel) mapDimensions() (cols, rows int) {
-	sidebarW := 0
-	if m.showSidebar {
-		sidebarW = ui.SidebarWidth + 1 // +1 for border
-	}
+	sidebarW := ui.SidebarWidth + 1 // +1 for border
 	cols = m.width - sidebarW
 	rows = m.height - 1 // -1 for status bar
 	if cols < 1 {
@@ -380,41 +460,39 @@ func (m MapViewModel) View() string {
 	// Render map area.
 	mapContent := m.renderMap(mapCols, mapRows)
 
-	var view string
-	if m.showSidebar {
-		sidebar := ui.RenderSidebar(m.incidents, m.selectedIncident, mapRows)
-		mapLines := strings.Split(mapContent, "\n")
-		sidebarLines := strings.Split(sidebar, "\n")
+	sidebar := ui.RenderSidebar(m.incidents, m.selectedIncident, mapRows, m.focus == FocusSidebar)
+	mapLines := strings.Split(mapContent, "\n")
+	sidebarLines := strings.Split(sidebar, "\n")
 
-		// Ensure equal line counts.
-		for len(mapLines) < mapRows {
-			mapLines = append(mapLines, strings.Repeat(" ", mapCols))
-		}
-		for len(sidebarLines) < mapRows {
-			sidebarLines = append(sidebarLines, strings.Repeat(" ", ui.SidebarWidth))
-		}
-
-		var joined strings.Builder
-		borderStyle := lipgloss.NewStyle().Foreground(ui.ColorBorder)
-		for i := 0; i < mapRows; i++ {
-			mapLine := mapLines[i]
-			var sbLine string
-			if i < len(sidebarLines) {
-				sbLine = sidebarLines[i]
-			}
-			joined.WriteString(mapLine)
-			joined.WriteString(borderStyle.Render("│"))
-			joined.WriteString(sbLine)
-			if i < mapRows-1 {
-				joined.WriteString("\n")
-			}
-		}
-		view = joined.String()
-	} else {
-		view = mapContent
+	// Ensure equal line counts.
+	for len(mapLines) < mapRows {
+		mapLines = append(mapLines, strings.Repeat(" ", mapCols))
+	}
+	for len(sidebarLines) < mapRows {
+		sidebarLines = append(sidebarLines, strings.Repeat(" ", ui.SidebarWidth))
 	}
 
-	statusBar := ui.RenderStatusBar(m.zip, m.nextRefresh, m.incidents, m.width, m.loading, m.tileSource.Name())
+	var joined strings.Builder
+	borderStyle := lipgloss.NewStyle().Foreground(ui.ColorBorder)
+	if m.focus == FocusSidebar {
+		borderStyle = borderStyle.Foreground(ui.ColorHighlight)
+	}
+	for i := 0; i < mapRows; i++ {
+		mapLine := mapLines[i]
+		var sbLine string
+		if i < len(sidebarLines) {
+			sbLine = sidebarLines[i]
+		}
+		joined.WriteString(mapLine)
+		joined.WriteString(borderStyle.Render("│"))
+		joined.WriteString(sbLine)
+		if i < mapRows-1 {
+			joined.WriteString("\n")
+		}
+	}
+	view := joined.String()
+
+	statusBar := ui.RenderStatusBar(m.zip, m.nextRefresh, m.incidents, m.width, m.loading, m.tileSource.Name(), m.numberBuf)
 	result := view + "\n" + statusBar
 
 	if m.showDetail && len(m.incidents) > 0 && m.selectedIncident < len(m.incidents) {

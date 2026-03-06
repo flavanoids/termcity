@@ -83,10 +83,12 @@ Tiles are cached to `~/.cache/termcity/tiles/{z}_{x}_{y}.png`. Cache is checked 
 | Key | Action |
 |-----|--------|
 | `+` / `-` | Zoom in/out |
-| Arrow keys | Pan map |
-| `j` / `k` | Navigate incident list |
-| `Tab` | Toggle sidebar |
-| `Enter` | (reserved for detail view) |
+| Arrow keys | Pan map (map focus) / Navigate list (sidebar focus) |
+| `j` / `k` | Navigate incident list (any focus) |
+| `Tab` | Switch focus between map and sidebar |
+| `Enter` | Show incident detail |
+| `1`–`9` | Jump to incident # and show detail |
+| `Esc` | Return focus to map / close overlay |
 | `r` | Refresh incidents |
 | `?` | Toggle help overlay |
 | `q` / `Ctrl+C` | Quit |
