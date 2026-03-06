@@ -54,6 +54,12 @@ func FetchAllIncidents(lat, lng float64, city string) ([]Incident, []string) {
 		}
 	}
 
+	// Optional enrichment hook (currently local timezone normalization only).
+	all = EnrichIncidents(all, EnrichmentOptions{
+		EnableTimezoneNormalization: true,
+		TargetLocation:              city,
+	})
+
 	// Deduplicate by ID.
 	seen := make(map[string]bool)
 	deduped := make([]Incident, 0, len(all))

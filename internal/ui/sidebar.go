@@ -11,10 +11,17 @@ import (
 
 const SidebarWidth = 26
 
-// RenderSidebar renders the incident list sidebar.
+// IncidentValidation captures lightweight validation/enrichment flags for an incident.
+type IncidentValidation struct {
+	Freshness       data.FreshnessBucket
+	LikelyDuplicate bool
+	OffMap          bool
+}
+
+// RenderSidebarWithValidation renders the incident list sidebar.
 // height is the available height (excluding status bar).
 // selected is the index of the currently highlighted incident.
-func RenderSidebar(incidents []data.Incident, selected int, height int, focused bool) string {
+func RenderSidebarWithValidation(incidents []data.Incident, validation []IncidentValidation, selected int, height int, focused bool) string {
 	var sb strings.Builder
 
 	titleText := "ACTIVE INCIDENTS"
@@ -62,6 +69,10 @@ func RenderSidebar(incidents []data.Incident, selected int, height int, focused 
 
 	for i := scrollOffset; i < len(incidents) && renderedLines < height; i++ {
 		inc := incidents[i]
+		var val IncidentValidation
+		if i < len(validation) {
+			val = validation[i]
+		}
 
 		numStr := fmt.Sprintf("%d.", i+1)
 		symbol := incidentSymbol(inc.Type)
@@ -70,14 +81,21 @@ func RenderSidebar(incidents []data.Incident, selected int, height int, focused 
 			maxTitle = 4
 		}
 		title := truncate(inc.Title, maxTitle)
+		// Prepend a short freshness badge when available.
+		if label := data.FreshnessLabel(val.Freshness); label != "" {
+			badge := "[" + label + "] "
+			if len(badge) < maxTitle {
+				title = truncate(badge+title, maxTitle)
+			}
+		}
 		line1 := fmt.Sprintf("%s %s %-*s", symbol, numStr, maxTitle, title)
 
 		addr := truncate(inc.Address, SidebarWidth-2)
 		line2 := fmt.Sprintf("  %-*s", SidebarWidth-2, addr)
 
-		ago := timeAgo(inc.Time)
+		ago := formatSidebarTime(inc.Time)
 		if len(ago) > 0 && len(line2)+len(ago)+1 < SidebarWidth {
-			// Fits: append ago time.
+			// Fits: append time/age.
 		} else {
 			ago = ""
 		}
@@ -164,6 +182,18 @@ func timeAgo(t time.Time) string {
 	return fmt.Sprintf("%dh", int(d.Hours()))
 }
 
+func formatSidebarTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	rel := timeAgo(t)
+	clock := t.Format("15:04")
+	if rel == "" {
+		return clock
+	}
+	return fmt.Sprintf("%s %s", clock, rel)
+}
+
 // RenderDetailOverlay renders a full incident detail box.
 func RenderDetailOverlay(inc data.Incident, width, height int) string {
 	boxWidth := min(60, width-4)
@@ -198,7 +228,7 @@ func formatDetail(inc data.Incident, width int) string {
 	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(incidentColor(inc.Type)).Render(title))
 	sb.WriteString("\n\n")
 	sb.WriteString(fmt.Sprintf("Address: %s\n", inc.Address))
-	sb.WriteString(fmt.Sprintf("Time:    %s (%s ago)\n", inc.Time.Format("15:04:05"), timeAgo(inc.Time)))
+	sb.WriteString(fmt.Sprintf("Reported: %s (%s ago)\n", inc.Time.Format("15:04"), timeAgo(inc.Time)))
 	sb.WriteString(fmt.Sprintf("Source:  %s\n", inc.Source))
 	if len(inc.Units) > 0 {
 		sb.WriteString(fmt.Sprintf("Units:   %s\n", strings.Join(inc.Units, ", ")))

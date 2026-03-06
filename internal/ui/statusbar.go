@@ -9,11 +9,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// RenderStatusBar renders the bottom status bar.
-func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Incident, width int, loading bool, mapStyle string, numberBuf string) string {
+// RenderStatusBarWithValidation renders the bottom status bar.
+func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents []data.Incident, validation []IncidentValidation, width int, loading bool, mapStyle string, numberBuf string) string {
 	// Count by type.
 	var fires, police, ems int
-	for _, inc := range incidents {
+	var staleCount, offMapCount, dupCount int
+	for i, inc := range incidents {
 		switch inc.Type {
 		case data.Fire:
 			fires++
@@ -21,6 +22,18 @@ func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Inciden
 			police++
 		case data.EMS:
 			ems++
+		}
+		if i < len(validation) {
+			v := validation[i]
+			if v.Freshness == data.FreshnessStale || v.Freshness == data.FreshnessOld {
+				staleCount++
+			}
+			if v.OffMap {
+				offMapCount++
+			}
+			if v.LikelyDuplicate {
+				dupCount++
+			}
 		}
 	}
 
@@ -41,6 +54,16 @@ func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Inciden
 		parts = append(parts, StatusBarStyle.Render(fmt.Sprintf("↻ %ds", int(remaining.Seconds()))))
 	}
 
+	// Most recent incident time (data freshness).
+	if len(incidents) > 0 {
+		last := incidents[0].Time
+		ago := timeAgo(last)
+		if ago == "" {
+			ago = "now"
+		}
+		parts = append(parts, StatusBarStyle.Render(fmt.Sprintf("Last %s", ago)))
+	}
+
 	// Incident counts.
 	counts := fmt.Sprintf("%s%d  %s%d  %s%d",
 		lipgloss.NewStyle().Foreground(ColorFire).Render("●"), fires,
@@ -48,6 +71,21 @@ func RenderStatusBar(zip string, nextRefresh time.Time, incidents []data.Inciden
 		lipgloss.NewStyle().Foreground(ColorEMS).Render("●"), ems,
 	)
 	parts = append(parts, counts)
+
+	// Validation summary (stale/off-map/dup).
+	if staleCount > 0 || offMapCount > 0 || dupCount > 0 {
+		summaryParts := []string{}
+		if staleCount > 0 {
+			summaryParts = append(summaryParts, fmt.Sprintf("%d stale", staleCount))
+		}
+		if offMapCount > 0 {
+			summaryParts = append(summaryParts, fmt.Sprintf("%d off-map", offMapCount))
+		}
+		if dupCount > 0 {
+			summaryParts = append(summaryParts, fmt.Sprintf("%d dup?", dupCount))
+		}
+		parts = append(parts, StatusBarStyle.Render(strings.Join(summaryParts, ", ")))
+	}
 
 	// Map style.
 	parts = append(parts, StatusBarKeyStyle.Render("[m]")+HelpStyle.Render(mapStyle))

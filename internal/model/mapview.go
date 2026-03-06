@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"termcity/internal/data"
@@ -16,7 +17,7 @@ import (
 type FocusArea int
 
 const (
-	FocusMap     FocusArea = iota
+	FocusMap FocusArea = iota
 	FocusSidebar
 )
 
@@ -54,8 +55,10 @@ type MapViewModel struct {
 	tileSource tilemap.TileSource
 
 	// Map state — safe to access without mutex (single-goroutine model)
-	tileCache   map[tilemap.TileKey][][]string
-	incidents   []data.Incident
+	tileCache map[tilemap.TileKey][][]string
+	incidents []data.Incident
+	// validation holds derived validation/enrichment info per incident index.
+	validation  []ui.IncidentValidation
 	warnings    []string
 	loading     bool
 	nextRefresh time.Time
@@ -178,6 +181,7 @@ func (m MapViewModel) Update(msg tea.Msg) (MapViewModel, tea.Cmd) {
 
 	case IncidentsFetchedMsg:
 		m.incidents = msg.Incidents
+		m.validation = computeIncidentValidation(msg.Incidents, m.lat, m.lng, m.zoom, m.width, m.height)
 		m.warnings = msg.Warnings
 		m.loading = false
 		m.nextRefresh = time.Now().Add(60 * time.Second)
@@ -457,10 +461,15 @@ func (m MapViewModel) View() string {
 
 	mapCols, mapRows := m.mapDimensions()
 
+	// Recompute validation when dimensions change so OffMap is accurate.
+	if len(m.incidents) > 0 {
+		m.validation = computeIncidentValidation(m.incidents, m.lat, m.lng, m.zoom, m.width, m.height)
+	}
+
 	// Render map area.
 	mapContent := m.renderMap(mapCols, mapRows)
 
-	sidebar := ui.RenderSidebar(m.incidents, m.selectedIncident, mapRows, m.focus == FocusSidebar)
+	sidebar := ui.RenderSidebarWithValidation(m.incidents, m.validation, m.selectedIncident, mapRows, m.focus == FocusSidebar)
 	mapLines := strings.Split(mapContent, "\n")
 	sidebarLines := strings.Split(sidebar, "\n")
 
@@ -492,7 +501,7 @@ func (m MapViewModel) View() string {
 	}
 	view := joined.String()
 
-	statusBar := ui.RenderStatusBar(m.zip, m.nextRefresh, m.incidents, m.width, m.loading, m.tileSource.Name(), m.numberBuf)
+	statusBar := ui.RenderStatusBarWithValidation(m.zip, m.nextRefresh, m.incidents, m.validation, m.width, m.loading, m.tileSource.Name(), m.numberBuf)
 	result := view + "\n" + statusBar
 
 	if m.showDetail && len(m.incidents) > 0 && m.selectedIncident < len(m.incidents) {
@@ -552,6 +561,10 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 
 	// Overlay numbered incident markers (3+ cells wide, 2 rows tall).
 	for i, inc := range m.incidents {
+		// Skip incidents that are off-map according to current validation snapshot.
+		if i < len(m.validation) && m.validation[i].OffMap {
+			continue
+		}
 		incPX, incPY := tilemap.LatLngToPixelCoord(inc.Lat, inc.Lng, m.zoom)
 		col, row := tilemap.PixelToCell(incPX, incPY, originPX, originPY)
 
@@ -598,6 +611,76 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 		}
 	}
 	return sb.String()
+}
+
+// computeIncidentValidation derives validation flags for each incident based on
+// current position/zoom and simple heuristics. It never mutates the incidents.
+func computeIncidentValidation(incidents []data.Incident, lat, lng float64, zoom, width, height int) []ui.IncidentValidation {
+	out := make([]ui.IncidentValidation, len(incidents))
+	if len(incidents) == 0 {
+		return out
+	}
+
+	now := time.Now()
+
+	// Pre-compute duplicate signatures.
+	sigs := make(map[string]int, len(incidents))
+	for _, inc := range incidents {
+		key := duplicateSignature(inc)
+		if key == "" {
+			continue
+		}
+		sigs[key]++
+	}
+
+	// Map bounds for off-map detection.
+	mapCols := 1
+	mapRows := 1
+	if width > 0 && height > 0 {
+		// Reuse mapDimensions calculation: sidebar width + status bar.
+		mapCols = width - ui.SidebarWidth - 1
+		if mapCols < 1 {
+			mapCols = 1
+		}
+		mapRows = height - 1
+		if mapRows < 1 {
+			mapRows = 1
+		}
+	}
+	originPX, originPY := tilemap.MapOriginPixel(lat, lng, zoom, mapCols, mapRows)
+
+	for i, inc := range incidents {
+		var v ui.IncidentValidation
+		v.Freshness = data.ClassifyFreshness(inc.Time, now)
+
+		// Duplicate inference.
+		if key := duplicateSignature(inc); key != "" && sigs[key] > 1 {
+			v.LikelyDuplicate = true
+		}
+
+		// Off-map detection using current viewport.
+		px, py := tilemap.LatLngToPixelCoord(inc.Lat, inc.Lng, zoom)
+		col, row := tilemap.PixelToCell(px, py, originPX, originPY)
+		if col < 0 || col >= mapCols || row < 0 || row >= mapRows {
+			v.OffMap = true
+		}
+
+		out[i] = v
+	}
+	return out
+}
+
+// duplicateSignature collapses an incident into a coarse key used to spot
+// likely duplicates from multiple sources.
+func duplicateSignature(inc data.Incident) string {
+	addr := strings.TrimSpace(strings.ToLower(inc.Address))
+	title := strings.TrimSpace(strings.ToLower(inc.Title))
+	if addr == "" && title == "" {
+		return ""
+	}
+	// Round to 5-minute buckets to avoid minor clock skew differences.
+	trunc := inc.Time.Truncate(5 * time.Minute).UTC().Format(time.RFC3339)
+	return fmt.Sprintf("%s|%s|%s|%d", addr, title, trunc, inc.Type)
 }
 
 // panDelta returns degrees to pan per keypress at the given zoom level.
