@@ -251,9 +251,21 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 
 	case "enter":
 		m.numberBuf = ""
-		if len(m.incidents) > 0 {
-			m.showDetail = true
+		if len(m.incidents) == 0 {
+			return m, nil
 		}
+		if m.focus == FocusSidebar &&
+			m.selectedIncident >= 0 &&
+			m.selectedIncident < len(m.incidents) {
+			inc := m.incidents[m.selectedIncident]
+			m.lat = inc.Lat
+			m.lng = inc.Lng
+			m.showDetail = true
+			var cmd tea.Cmd
+			m, cmd = m.afterPan()
+			return m, cmd
+		}
+		m.showDetail = true
 		return m, nil
 
 	case "+", "=":

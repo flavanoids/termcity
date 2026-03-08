@@ -36,10 +36,11 @@ type nominatimResult struct {
 
 // GeoLocation holds a geocoded lat/lng with a display name.
 type GeoLocation struct {
-	Lat, Lng    float64
-	DisplayName string
-	City        string
-	State       string
+	Lat         float64 `json:"lat"`
+	Lng         float64 `json:"lng"`
+	DisplayName string  `json:"display_name"`
+	City        string  `json:"city"`
+	State       string  `json:"state"`
 }
 
 // GeocodeAddress resolves a street address to lat/lng via Nominatim structured search.

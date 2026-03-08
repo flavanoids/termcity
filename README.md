@@ -52,6 +52,38 @@ go build -o termcity .
 
 On launch, enter any US zip code to center the map on that location.
 
+## Web version
+
+A separate browser-based binary with the same functionality (geocode by ZIP, OSM map, incidents, sidebar, detail modal). It uses the same data layer and is optimized for desktop and mobile.
+
+**Run (separate binary, background by default):**
+
+```bash
+go build -o termcity-web ./cmd/termcity-web
+./termcity-web
+```
+
+The server starts in the background and prints the URL and port, for example:
+
+```
+TermCity web server is running in the background.
+Open in your browser: http://localhost:8080
+Port: 8080 (stop with: kill <pid>)
+```
+
+Then open the printed URL in your browser. Enter a US zip code to load the map and incidents. Use the map style dropdown (OSM / Dark / Light), the Refresh button or <kbd>r</kbd>, and click markers or list items for details. Keyboard: <kbd>1</kbd>–<kbd>9</kbd> jump to incident and show detail; <kbd>?</kbd> opens help.
+
+**Options:** `-port 8080` (default; overridden by `PORT` env), `-foreground` to run in the foreground (e.g. under systemd or to see logs).
+
+**Install via .deb (Linux amd64):**
+
+```bash
+./scripts/build-deb-web.sh
+sudo dpkg -i termcity-web_1.0.0_amd64.deb
+```
+
+Then run `termcity-web`; it will start in the background and print the URL and port.
+
 ## Key Bindings
 
 | Key | Action |
@@ -81,12 +113,15 @@ Built in Go with the [Bubbletea](https://github.com/charmbracelet/bubbletea) TUI
 
 ```
 termcity/
-├── main.go
+├── main.go              # TUI entry point
+├── cmd/termcity-web/    # Web server: API (geocode, incidents) + embedded static frontend
+│   ├── main.go
+│   └── static/          # HTML, CSS, JS (Leaflet map, Bootstrap UI)
 └── internal/
     ├── model/       # Bubbletea screen models (zip input → loading → map view)
-    ├── data/        # API clients: geocoding, PulsePoint, Socrata, aggregator
-    ├── tilemap/     # Tile fetching, disk cache, Web Mercator math, PNG → half-block render
-    └── ui/          # Lipgloss styles, sidebar, status bar
+    ├── data/        # API clients: geocoding, PulsePoint, Socrata, aggregator (shared by TUI and web)
+    ├── tilemap/     # Tile fetching, disk cache, Web Mercator math, PNG → half-block render (TUI only)
+    └── ui/          # Lipgloss styles, sidebar, status bar (TUI only)
 ```
 
 Map tiles (256×256 PNG) are decoded pixel-by-pixel and converted to terminal strings using `▀` (U+2580): each cell encodes two vertical pixels via foreground and background 24-bit colors. Incident data is fetched in parallel from all sources and merged before display.
