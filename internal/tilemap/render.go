@@ -6,8 +6,19 @@ import (
 	"image"
 	"image/color"
 	_ "image/png"
+	"math"
 	"strconv"
 )
+
+// PulseFrames is the number of animation frames in one full pulse cycle.
+const PulseFrames = 20
+
+// PulseIntensity returns a brightness multiplier (0.4–1.0) for the given
+// animation frame, producing a smooth sinusoidal "breathing" effect.
+func PulseIntensity(frame int) float64 {
+	t := float64(frame%PulseFrames) / float64(PulseFrames) * 2 * math.Pi
+	return 0.55 + 0.45*math.Sin(t)
+}
 
 // upperHalfBlock is U+2580 "▀" — upper half block character.
 const upperHalfBlock = "▀"
@@ -123,15 +134,23 @@ func ColoredCell(ch rune, fgHex string, bgR, bgG, bgB uint8) string {
 		c.R, c.G, c.B, bgR, bgG, bgB, ch)
 }
 
-// SolidBgCell returns an ANSI string for a space with a solid colored background.
-func SolidBgCell(colorHex string) string {
+// SolidBgCell returns an ANSI string for a space with a solid colored background,
+// modulated by the given pulse intensity (0.0–1.0).
+func SolidBgCell(colorHex string, intensity float64) string {
 	c := ParseHexColor(colorHex)
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm \x1b[0m", c.R, c.G, c.B)
+	r := uint8(float64(c.R) * intensity)
+	g := uint8(float64(c.G) * intensity)
+	b := uint8(float64(c.B) * intensity)
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm \x1b[0m", r, g, b)
 }
 
-// NumberCell returns an ANSI string for a white digit on a colored background.
-func NumberCell(ch rune, colorHex string) string {
+// NumberCell returns an ANSI string for a white digit on a colored background,
+// modulated by the given pulse intensity (0.0–1.0).
+func NumberCell(ch rune, colorHex string, intensity float64) string {
 	c := ParseHexColor(colorHex)
+	r := uint8(float64(c.R) * intensity)
+	g := uint8(float64(c.G) * intensity)
+	b := uint8(float64(c.B) * intensity)
 	return fmt.Sprintf("\x1b[1m\x1b[38;2;255;255;255m\x1b[48;2;%d;%d;%dm%c\x1b[0m",
-		c.R, c.G, c.B, ch)
+		r, g, b, ch)
 }

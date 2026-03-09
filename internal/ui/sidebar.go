@@ -21,7 +21,8 @@ type IncidentValidation struct {
 // RenderSidebarWithValidation renders the incident list sidebar.
 // height is the available height (excluding status bar).
 // selected is the index of the currently highlighted incident.
-func RenderSidebarWithValidation(incidents []data.Incident, validation []IncidentValidation, selected int, height int, focused bool) string {
+// pulseIntensity (0.0–1.0) modulates the brightness of incident symbols.
+func RenderSidebarWithValidation(incidents []data.Incident, validation []IncidentValidation, selected int, height int, focused bool, pulseIntensity float64) string {
 	var sb strings.Builder
 
 	titleText := "ACTIVE INCIDENTS"
@@ -75,7 +76,7 @@ func RenderSidebarWithValidation(incidents []data.Incident, validation []Inciden
 		}
 
 		numStr := fmt.Sprintf("%d.", i+1)
-		symbol := incidentSymbol(inc.Type)
+		symbol := incidentSymbolPulsed(inc.Type, pulseIntensity)
 		maxTitle := SidebarWidth - 4 - len(numStr) - 1
 		if maxTitle < 4 {
 			maxTitle = 4
@@ -133,16 +134,23 @@ func RenderSidebarWithValidation(incidents []data.Incident, validation []Inciden
 	return sb.String()
 }
 
-func incidentSymbol(t data.IncidentType) string {
+func incidentSymbolPulsed(t data.IncidentType, intensity float64) string {
+	var r, g, b uint8
 	switch t {
 	case data.Fire:
-		return IncidentFireStyle.Render("●")
+		r, g, b = 0xFF, 0x44, 0x44
 	case data.Police:
-		return IncidentPoliceStyle.Render("●")
+		r, g, b = 0x44, 0x88, 0xFF
 	case data.EMS:
-		return IncidentEMSStyle.Render("●")
+		r, g, b = 0xEE, 0xEE, 0xEE
+	default:
+		r, g, b = 0xEE, 0xEE, 0xEE
 	}
-	return "●"
+	pr := uint8(float64(r) * intensity)
+	pg := uint8(float64(g) * intensity)
+	pb := uint8(float64(b) * intensity)
+	color := fmt.Sprintf("#%02x%02x%02x", pr, pg, pb)
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render("●")
 }
 
 func incidentStyle(t data.IncidentType) lipgloss.Style {

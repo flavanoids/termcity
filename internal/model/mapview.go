@@ -21,8 +21,6 @@ const (
 	FocusSidebar
 )
 
-// pulseChars is the animation sequence for incident markers.
-var pulseChars = []rune{' ', '·', '•', '●', '◉', '●', '•', '·'}
 
 // incidentFetchThreshold is the minimum movement (degrees) before re-fetching incidents on pan.
 // ~0.05° ≈ 5.5 km at the equator.
@@ -121,7 +119,7 @@ type TickMsg time.Time
 // --- Commands ---
 
 func tickCmd() tea.Cmd {
-	return tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+	return tea.Tick(200*time.Millisecond, func(t time.Time) tea.Msg {
 		return TickMsg(t)
 	})
 }
@@ -197,7 +195,7 @@ func (m MapViewModel) Update(msg tea.Msg) (MapViewModel, tea.Cmd) {
 		)
 
 	case TickMsg:
-		m.frame = (m.frame + 1) % len(pulseChars)
+		m.frame = (m.frame + 1) % tilemap.PulseFrames
 		// Auto-open detail after number-key timeout.
 		if m.numberBuf != "" && time.Since(m.numberBufAt) > numberBufTimeout {
 			num, err := strconv.Atoi(m.numberBuf)
@@ -481,7 +479,7 @@ func (m MapViewModel) View() string {
 	// Render map area.
 	mapContent := m.renderMap(mapCols, mapRows)
 
-	sidebar := ui.RenderSidebarWithValidation(m.incidents, m.validation, m.selectedIncident, mapRows, m.focus == FocusSidebar)
+	sidebar := ui.RenderSidebarWithValidation(m.incidents, m.validation, m.selectedIncident, mapRows, m.focus == FocusSidebar, tilemap.PulseIntensity(m.frame))
 	mapLines := strings.Split(mapContent, "\n")
 	sidebarLines := strings.Split(sidebar, "\n")
 
@@ -571,9 +569,9 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 		}
 	}
 
-	// Overlay numbered incident markers (3+ cells wide, 2 rows tall).
+	// Overlay numbered incident markers (3+ cells wide, 2 rows tall) with pulse.
+	pulse := tilemap.PulseIntensity(m.frame)
 	for i, inc := range m.incidents {
-		// Skip incidents that are off-map according to current validation snapshot.
 		if i < len(m.validation) && m.validation[i].OffMap {
 			continue
 		}
@@ -581,7 +579,7 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 		col, row := tilemap.PixelToCell(incPX, incPY, originPX, originPY)
 
 		numStr := strconv.Itoa(i + 1)
-		markerW := len(numStr) + 2 // padding on each side
+		markerW := len(numStr) + 2
 		startCol := col - markerW/2
 		colorHex := inc.Type.Color()
 
@@ -590,7 +588,7 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 			for dx := 0; dx < markerW; dx++ {
 				gc := startCol + dx
 				if gc >= 0 && gc < cols {
-					grid[row-1][gc] = tilemap.SolidBgCell(colorHex)
+					grid[row-1][gc] = tilemap.SolidBgCell(colorHex, pulse)
 				}
 			}
 		}
@@ -604,9 +602,9 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 				}
 				digitIdx := dx - 1
 				if digitIdx >= 0 && digitIdx < len(numStr) {
-					grid[row][gc] = tilemap.NumberCell(rune(numStr[digitIdx]), colorHex)
+					grid[row][gc] = tilemap.NumberCell(rune(numStr[digitIdx]), colorHex, pulse)
 				} else {
-					grid[row][gc] = tilemap.SolidBgCell(colorHex)
+					grid[row][gc] = tilemap.SolidBgCell(colorHex, pulse)
 				}
 			}
 		}
