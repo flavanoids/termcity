@@ -28,11 +28,12 @@ Priority: optional
 Architecture: $ARCH
 Maintainer: TermCity <termcity@localhost>
 Description: TermCity web — 911 incident map in your browser
- Browser-based 911 incident viewer. Enter a US zip code to see
- fire, EMS, and police incidents on an OpenStreetMap map.
- Runs in the background and prints the URL and port on startup.
+ Browser-based 911 incident viewer with history tracking.
+ Enter a US zip code to see fire, EMS, and police incidents
+ on an OpenStreetMap map. Stores incident history in a local
+ SQLite database for 7-day lookback.
  .
- Use -foreground to run in foreground; -port N to set port.
+ Usage: termcity-web [-port N] [-foreground] <zipcode>
 EOF
 
 dpkg-deb --build "$PKG"

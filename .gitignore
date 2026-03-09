@@ -1,4 +1,6 @@
-termcity
-termcity-web
+/termcity
+/termcity-web
+termcity_*.deb
 termcity-web_*.deb
+*.db
 .claude/
