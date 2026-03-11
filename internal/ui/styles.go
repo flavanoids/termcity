@@ -94,4 +94,28 @@ var (
 			Padding(1, 2).
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorHighlight)
+
+	HistoryTitleStyle = lipgloss.NewStyle().
+				Background(ColorBorder).
+				Foreground(ColorHighlight).
+				Bold(true).
+				PaddingLeft(1)
+
+	HistoryHeaderStyle = lipgloss.NewStyle().
+				Background(ColorBg).
+				Foreground(ColorDim).
+				Bold(true).
+				PaddingLeft(1)
+
+	HistoryRowStyle = lipgloss.NewStyle().
+			Background(ColorSidebarBg).
+			Foreground(ColorText).
+			PaddingLeft(1)
+
+	HistoryTabActive = lipgloss.NewStyle().
+				Foreground(ColorHighlight).
+				Bold(true)
+
+	HistoryTabInactive = lipgloss.NewStyle().
+				Foreground(ColorDim)
 )

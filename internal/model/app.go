@@ -2,6 +2,7 @@ package model
 
 import (
 	"termcity/internal/data"
+	"termcity/internal/history"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -13,7 +14,7 @@ const (
 	ScreenZipInput Screen = iota
 	ScreenLoading
 	ScreenMap
-	ScreenDetail
+	ScreenHistory
 )
 
 // GeocodeDoneMsg signals that geocoding has completed.
@@ -24,21 +25,24 @@ type GeocodeDoneMsg struct {
 
 // AppModel is the root model that routes between screens.
 type AppModel struct {
-	screen   Screen
-	width    int
-	height   int
-	zip      string
-	loc      *data.GeoLocation
-	loadMsg  string
-	errMsg   string
-	zipInput ZipInputModel
-	mapView  MapViewModel
+	screen       Screen
+	width        int
+	height       int
+	zip          string
+	loc          *data.GeoLocation
+	loadMsg      string
+	errMsg       string
+	zipInput     ZipInputModel
+	mapView      MapViewModel
+	historyView  HistoryViewModel
+	historyStore *history.Store
 }
 
-func NewAppModel() AppModel {
+func NewAppModel(store *history.Store) AppModel {
 	return AppModel{
-		screen:   ScreenZipInput,
-		zipInput: NewZipInputModel(),
+		screen:       ScreenZipInput,
+		zipInput:     NewZipInputModel(),
+		historyStore: store,
 	}
 }
 
@@ -50,6 +54,17 @@ func (m AppModel) Init() tea.Cmd {
 }
 
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// Intercept screen-transition messages before routing to sub-models.
+	switch msg.(type) {
+	case ShowHistoryMsg:
+		m.screen = ScreenHistory
+		m.historyView = NewHistoryViewModel(m.historyStore, m.width, m.height)
+		return m, m.historyView.Init()
+	case BackToMapMsg:
+		m.screen = ScreenMap
+		return m, nil
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -61,6 +76,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case ScreenMap:
 			var cmd tea.Cmd
 			m.mapView, cmd = m.mapView.Update(msg)
+			return m, cmd
+		case ScreenHistory:
+			var cmd tea.Cmd
+			m.historyView, cmd = m.historyView.Update(msg)
 			return m, cmd
 		}
 		return m, nil
@@ -79,8 +98,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.loc = msg.Loc
 		m.screen = ScreenMap
-		m.mapView = NewMapViewModel(m.zip, msg.Loc.Lat, msg.Loc.Lng, msg.Loc.City)
-		// Pass window size to map.
+		m.mapView = NewMapViewModel(m.zip, msg.Loc.Lat, msg.Loc.Lng, msg.Loc.City, m.historyStore)
 		m.mapView.width = m.width
 		m.mapView.height = m.height
 		cmds := []tea.Cmd{m.mapView.Init()}
@@ -99,6 +117,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.mapView, cmd = m.mapView.Update(msg)
 			return m, cmd
+		case ScreenHistory:
+			var cmd tea.Cmd
+			m.historyView, cmd = m.historyView.Update(msg)
+			return m, cmd
 		case ScreenLoading:
 			if msg.Type == tea.KeyCtrlC {
 				return m, tea.Quit
@@ -116,6 +138,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var cmd tea.Cmd
 			m.mapView, cmd = m.mapView.Update(msg)
 			return m, cmd
+		case ScreenHistory:
+			var cmd tea.Cmd
+			m.historyView, cmd = m.historyView.Update(msg)
+			return m, cmd
 		}
 	}
 
@@ -130,6 +156,8 @@ func (m AppModel) View() string {
 		return LoadingView(m.zip, m.loadMsg, m.width, m.height)
 	case ScreenMap:
 		return m.mapView.View()
+	case ScreenHistory:
+		return m.historyView.View()
 	default:
 		return "Unknown screen"
 	}

@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 	"termcity/internal/data"
+	"termcity/internal/history"
 	"termcity/internal/tilemap"
 	"termcity/internal/ui"
 	"time"
@@ -74,12 +75,17 @@ type MapViewModel struct {
 	numberBuf   string
 	numberBufAt time.Time
 
+	// History
+	historyStore *history.Store
+	histStats    HistoryStatsMsg
+
 	// Error state
 	err string
 }
 
-func NewMapViewModel(zip string, lat, lng float64, city string) MapViewModel {
+func NewMapViewModel(zip string, lat, lng float64, city string, store *history.Store) MapViewModel {
 	return MapViewModel{
+		historyStore: store,
 		zip:          zip,
 		lat:          lat,
 		lng:          lng,
@@ -115,6 +121,21 @@ type RefreshMsg struct{}
 
 // TickMsg drives animation.
 type TickMsg time.Time
+
+// ShowHistoryMsg signals a transition to the history screen.
+type ShowHistoryMsg struct{}
+
+// HistoryLoggedMsg is returned after incidents are logged to the store.
+type HistoryLoggedMsg struct {
+	NewCount int
+	Err      error
+}
+
+// HistoryStatsMsg carries DB stats for display in the status bar.
+type HistoryStatsMsg struct {
+	Day1, Day3, Day7 int
+	Err              error
+}
 
 // --- Commands ---
 
@@ -156,6 +177,29 @@ func fetchIncidentsCmd(lat, lng float64, city string) tea.Cmd {
 	}
 }
 
+func logIncidentsCmd(store *history.Store, incidents []data.Incident) tea.Cmd {
+	return func() tea.Msg {
+		if store == nil || len(incidents) == 0 {
+			return HistoryLoggedMsg{}
+		}
+		n, err := store.LogIncidents(incidents)
+		if err == nil {
+			store.Prune()
+		}
+		return HistoryLoggedMsg{NewCount: n, Err: err}
+	}
+}
+
+func fetchHistoryStatsCmd(store *history.Store) tea.Cmd {
+	return func() tea.Msg {
+		if store == nil {
+			return HistoryStatsMsg{}
+		}
+		d1, d3, d7, err := store.Stats()
+		return HistoryStatsMsg{Day1: d1, Day3: d3, Day7: d7, Err: err}
+	}
+}
+
 func (m MapViewModel) Init() tea.Cmd {
 	return tea.Batch(
 		tickCmd(),
@@ -185,6 +229,16 @@ func (m MapViewModel) Update(msg tea.Msg) (MapViewModel, tea.Cmd) {
 		m.nextRefresh = time.Now().Add(60 * time.Second)
 		m.lastFetchLat = m.lat
 		m.lastFetchLng = m.lng
+		return m, tea.Batch(
+			logIncidentsCmd(m.historyStore, msg.Incidents),
+			fetchHistoryStatsCmd(m.historyStore),
+		)
+
+	case HistoryLoggedMsg:
+		return m, nil
+
+	case HistoryStatsMsg:
+		m.histStats = msg
 		return m, nil
 
 	case RefreshMsg:
@@ -333,6 +387,9 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 	case "l":
 		m.lng += panDelta(m.zoom)
 		return m.afterPan()
+
+	case "H":
+		return m, func() tea.Msg { return ShowHistoryMsg{} }
 
 	case "?":
 		m.showHelp = !m.showHelp
@@ -511,7 +568,7 @@ func (m MapViewModel) View() string {
 	}
 	view := joined.String()
 
-	statusBar := ui.RenderStatusBarWithValidation(m.zip, m.nextRefresh, m.incidents, m.validation, m.width, m.loading, m.tileSource.Name(), m.numberBuf)
+	statusBar := ui.RenderStatusBarWithValidation(m.zip, m.nextRefresh, m.incidents, m.validation, m.width, m.loading, m.tileSource.Name(), m.numberBuf, m.histStats.Day1, m.histStats.Day3, m.histStats.Day7)
 	result := view + "\n" + statusBar
 
 	if m.showDetail && len(m.incidents) > 0 && m.selectedIncident < len(m.incidents) {

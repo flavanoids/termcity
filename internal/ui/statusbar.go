@@ -10,7 +10,7 @@ import (
 )
 
 // RenderStatusBarWithValidation renders the bottom status bar.
-func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents []data.Incident, validation []IncidentValidation, width int, loading bool, mapStyle string, numberBuf string) string {
+func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents []data.Incident, validation []IncidentValidation, width int, loading bool, mapStyle string, numberBuf string, histDay1, histDay3, histDay7 int) string {
 	// Count by type.
 	var fires, police, ems int
 	var staleCount, offMapCount, dupCount int
@@ -90,6 +90,12 @@ func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents 
 	// Map style.
 	parts = append(parts, StatusBarKeyStyle.Render("[m]")+HelpStyle.Render(mapStyle))
 
+	// History DB stats badge (shown when store has data).
+	if histDay7 > 0 {
+		dbBadge := fmt.Sprintf("%d/%d/%d", histDay1, histDay3, histDay7)
+		parts = append(parts, StatusBarKeyStyle.Render("DB:")+HelpStyle.Render(dbBadge))
+	}
+
 	// Number input feedback.
 	if numberBuf != "" {
 		parts = append(parts, StatusBarKeyStyle.Render("#")+StatusBarStyle.Render(numberBuf+"…"))
@@ -98,6 +104,7 @@ func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents 
 	// Help hint.
 	helpPart := StatusBarKeyStyle.Render("[Tab]") + HelpStyle.Render("Focus") +
 		"  " + StatusBarKeyStyle.Render("[1-9]") + HelpStyle.Render("Go to") +
+		"  " + StatusBarKeyStyle.Render("[H]") + HelpStyle.Render("History") +
 		"  " + StatusBarKeyStyle.Render("[?]") + HelpStyle.Render("Help") +
 		"  " + StatusBarKeyStyle.Render("[q]") + HelpStyle.Render("Quit")
 	parts = append(parts, helpPart)
@@ -128,6 +135,7 @@ func RenderHelpOverlay(width, height int) string {
 		fmt.Sprintf("  %-10s %s", "1-9", "Jump to event # (detail)"),
 		fmt.Sprintf("  %-10s %s", "j/k", "Navigate event list"),
 		fmt.Sprintf("  %-10s %s", "r", "Refresh incidents"),
+		fmt.Sprintf("  %-10s %s", "H", "Open incident history"),
 		fmt.Sprintf("  %-10s %s", "Tab", "Switch focus"),
 		fmt.Sprintf("  %-10s %s", "?", "Toggle this help"),
 		fmt.Sprintf("  %-10s %s", "q / Ctrl+C", "Quit"),
