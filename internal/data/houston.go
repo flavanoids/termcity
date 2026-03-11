@@ -89,6 +89,21 @@ func houstonCacheKey(row houstonRow) string {
 	return row.address
 }
 
+// houstonGeoStreet builds the street string for Nominatim.
+// Houston's cross-street field often starts with "BLK " (e.g. "BLK HERSCHELWOOD DR"),
+// which is a block descriptor, not a true cross-street name. Strip it so Nominatim
+// can resolve the intersection.
+func houstonGeoStreet(row houstonRow) string {
+	cross := row.crossStreet
+	if strings.HasPrefix(strings.ToUpper(cross), "BLK ") {
+		cross = cross[4:]
+	}
+	if cross != "" {
+		return row.address + " & " + cross
+	}
+	return row.address
+}
+
 func buildHoustonIncident(row houstonRow, lat, lng float64) Incident {
 	itype := EMS
 	lower := strings.ToLower(row.incidentType)
@@ -174,11 +189,7 @@ func FetchHoustonIncidents() ([]Incident, error) {
 		}
 
 		for _, row := range syncBatch {
-			street := row.address
-			if row.crossStreet != "" {
-				street = row.address + " & " + row.crossStreet
-			}
-			lat, lng, err := GeocodeAddress(street, "Houston", "TX")
+			lat, lng, err := GeocodeAddress(houstonGeoStreet(row), "Houston", "TX")
 			if err != nil || (lat == 0 && lng == 0) {
 				continue
 			}
@@ -212,12 +223,7 @@ func geocodeHoustonRows(rows []houstonRow) {
 			continue
 		}
 
-		street := row.address
-		if row.crossStreet != "" {
-			street = row.address + " & " + row.crossStreet
-		}
-
-		lat, lng, err := GeocodeAddress(street, "Houston", "TX")
+		lat, lng, err := GeocodeAddress(houstonGeoStreet(row), "Houston", "TX")
 		if err != nil || (lat == 0 && lng == 0) {
 			continue
 		}

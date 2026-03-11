@@ -96,16 +96,21 @@ Then run `termcity-web`; it will start in the background and print the URL and p
 | `?` | Toggle help overlay |
 | `q` / `Ctrl+C` | Quit |
 
+## Coverage
+
+> **Currently focused on Houston, TX.** Incident data is actively tested and validated against Houston's live feed. Other US cities may work partially via PulsePoint (fire/EMS) and Socrata (police) where those cities publish open data, but coverage is not guaranteed.
+
 ## Data Sources
 
-| Source | Data | Notes |
-|--------|------|-------|
-| [OpenStreetMap](https://www.openstreetmap.org) | Map tiles | Max 2 req/s per ToS |
-| [Nominatim](https://nominatim.org) | Zip → lat/lng geocoding | Max 1 req/s per ToS |
-| [PulsePoint](https://www.pulsepoint.org) | Fire & EMS incidents | Unofficial API |
-| [Socrata Open Data](https://dev.socrata.com) | Police incidents | City-specific datasets |
+| Source | Data | Coverage |
+|--------|------|----------|
+| [OpenStreetMap](https://www.openstreetmap.org) | Map tiles | Worldwide |
+| [Nominatim](https://nominatim.org) | Zip → lat/lng geocoding | US zip codes |
+| [City of Houston](https://cohweb.houstontx.gov/ActiveIncidents/Combined.aspx) | HFD & HPD active incidents | Houston, TX only |
+| [PulsePoint](https://www.pulsepoint.org) | Fire & EMS incidents | Select US cities (unofficial API) |
+| [Socrata Open Data](https://dev.socrata.com) | Police incidents | Select US cities |
 
-Incident data is sourced from public safety APIs and open government data portals. Coverage depends on your city's data sharing agreements.
+Incident data is sourced from public safety APIs and open government data portals. Rate limits are respected per each source's ToS.
 
 ## Architecture
 
