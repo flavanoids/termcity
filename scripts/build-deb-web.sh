@@ -18,7 +18,15 @@ mkdir -p "$PKG/usr/bin"
 mv termcity-web.linux-amd64 "$PKG/usr/bin/termcity-web"
 chmod 755 "$PKG/usr/bin/termcity-web"
 
-# Debian control (override Architecture if cross-building)
+# Systemd service
+mkdir -p "$PKG/lib/systemd/system"
+cp scripts/termcity-web.service "$PKG/lib/systemd/system/termcity-web.service"
+
+# Default config (won't overwrite existing on upgrade)
+mkdir -p "$PKG/etc/default"
+cp scripts/termcity-web.default "$PKG/etc/default/termcity-web"
+
+# Debian control
 mkdir -p "$PKG/DEBIAN"
 cat > "$PKG/DEBIAN/control" << EOF
 Package: termcity-web
@@ -33,8 +41,37 @@ Description: TermCity web — 911 incident map in your browser
  on an OpenStreetMap map. Stores incident history in a local
  SQLite database for 7-day lookback.
  .
- Usage: termcity-web [-port N] [-foreground] <zipcode>
+ Configure zip code in /etc/default/termcity-web, then:
+   systemctl enable --now termcity-web
 EOF
+
+# Mark /etc/default/termcity-web as a conffile (preserved on upgrade)
+cat > "$PKG/DEBIAN/conffiles" << EOF
+/etc/default/termcity-web
+EOF
+
+# postinst: enable and start the service
+cat > "$PKG/DEBIAN/postinst" << 'EOF'
+#!/bin/sh
+set -e
+if [ "$1" = "configure" ]; then
+    systemctl daemon-reload
+    systemctl enable termcity-web
+    systemctl restart termcity-web || true
+fi
+EOF
+chmod 755 "$PKG/DEBIAN/postinst"
+
+# prerm: stop and disable the service before removal
+cat > "$PKG/DEBIAN/prerm" << 'EOF'
+#!/bin/sh
+set -e
+if [ "$1" = "remove" ]; then
+    systemctl stop termcity-web || true
+    systemctl disable termcity-web || true
+fi
+EOF
+chmod 755 "$PKG/DEBIAN/prerm"
 
 dpkg-deb --build "$PKG"
 rm -rf "$PKG"

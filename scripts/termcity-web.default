@@ -1,0 +1,5 @@
+# TermCity Web configuration
+# Set your zip code and port here, then: systemctl restart termcity-web
+
+ZIPCODE=77092
+PORT=8911

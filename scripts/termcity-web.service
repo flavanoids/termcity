@@ -1,0 +1,14 @@
+[Unit]
+Description=TermCity Web — 911 incident map
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/default/termcity-web
+ExecStart=/usr/bin/termcity-web -port ${PORT} ${ZIPCODE}
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
