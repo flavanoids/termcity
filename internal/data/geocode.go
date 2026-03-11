@@ -84,8 +84,15 @@ func GeocodeAddress(street, city, state string) (float64, float64, error) {
 	return lat, lng, nil
 }
 
-// GeocodeZip converts a US zip code to lat/lng via Nominatim.
+// GeocodeZip converts a US zip code to lat/lng via Nominatim, with fallback to zippopotam.us.
 func GeocodeZip(zip string) (*GeoLocation, error) {
+	if loc, err := geocodeZipNominatim(zip); err == nil {
+		return loc, nil
+	}
+	return geocodeZipFallback(zip)
+}
+
+func geocodeZipNominatim(zip string) (*GeoLocation, error) {
 	geocodeRateLimit()
 
 	params := url.Values{}
@@ -109,16 +116,20 @@ func GeocodeZip(zip string) (*GeoLocation, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("nominatim returned HTTP %d", resp.StatusCode)
+	}
+
 	var results []struct {
 		Lat     string `json:"lat"`
 		Lon     string `json:"lon"`
 		Display string `json:"display_name"`
 		Address struct {
-			City       string `json:"city"`
-			Town       string `json:"town"`
-			Village    string `json:"village"`
-			State      string `json:"state"`
-			Postcode   string `json:"postcode"`
+			City     string `json:"city"`
+			Town     string `json:"town"`
+			Village  string `json:"village"`
+			State    string `json:"state"`
+			Postcode string `json:"postcode"`
 		} `json:"address"`
 	}
 
@@ -148,5 +159,50 @@ func GeocodeZip(zip string) (*GeoLocation, error) {
 		DisplayName: r.Display,
 		City:        city,
 		State:       r.Address.State,
+	}, nil
+}
+
+// geocodeZipFallback uses api.zippopotam.us when Nominatim is unavailable.
+func geocodeZipFallback(zip string) (*GeoLocation, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get("https://api.zippopotam.us/us/" + url.PathEscape(zip))
+	if err != nil {
+		return nil, fmt.Errorf("geocode fallback request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("geocode fallback returned HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		PostCode string `json:"post code"`
+		Country  string `json:"country"`
+		Places   []struct {
+			PlaceName string `json:"place name"`
+			Longitude string `json:"longitude"`
+			Latitude  string `json:"latitude"`
+			State     string `json:"state"`
+		} `json:"places"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("geocode fallback decode: %w", err)
+	}
+	if len(result.Places) == 0 {
+		return nil, fmt.Errorf("no geocode results for zip %q", zip)
+	}
+
+	p := result.Places[0]
+	var lat, lng float64
+	fmt.Sscanf(p.Latitude, "%f", &lat)
+	fmt.Sscanf(p.Longitude, "%f", &lng)
+
+	return &GeoLocation{
+		Lat:         lat,
+		Lng:         lng,
+		DisplayName: fmt.Sprintf("%s, %s %s", p.PlaceName, p.State, zip),
+		City:        p.PlaceName,
+		State:       p.State,
 	}, nil
 }
