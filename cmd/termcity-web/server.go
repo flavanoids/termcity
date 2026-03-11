@@ -108,6 +108,22 @@ func (a *app) handleHistory(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *app) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST required", http.StatusMethodNotAllowed)
+		return
+	}
+	// Prevent concurrent manual refreshes; return 429 if one is already in flight.
+	if !a.refreshMu.TryLock() {
+		http.Error(w, "refresh already in progress", http.StatusTooManyRequests)
+		return
+	}
+	defer a.refreshMu.Unlock()
+
+	a.poll()
+	a.handleLiveIncidents(w, r)
+}
+
 func (a *app) handleClearHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST required", http.StatusMethodNotAllowed)

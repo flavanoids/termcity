@@ -32,10 +32,11 @@ var (
 type app struct {
 	store *history.Store
 
-	mu       sync.RWMutex
-	live     []data.Incident
-	warnings []string
-	lastPoll time.Time
+	mu         sync.RWMutex
+	live       []data.Incident
+	warnings   []string
+	lastPoll   time.Time
+	refreshMu  sync.Mutex // TryLock prevents concurrent manual refreshes
 
 	zip  string
 	lat  float64
@@ -232,6 +233,7 @@ func runDaemon(zip string) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", a.handleIndex)
 	mux.HandleFunc("/api/incidents", a.handleLiveIncidents)
+	mux.HandleFunc("/api/refresh", a.handleRefresh)
 	mux.HandleFunc("/api/history", a.handleHistory)
 	mux.HandleFunc("/api/history/clear", a.handleClearHistory)
 	mux.HandleFunc("/api/status", a.handleStatus)
