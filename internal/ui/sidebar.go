@@ -150,7 +150,8 @@ func incidentSymbolPulsed(t data.IncidentType, intensity float64) string {
 	pg := uint8(float64(g) * intensity)
 	pb := uint8(float64(b) * intensity)
 	color := fmt.Sprintf("#%02x%02x%02x", pr, pg, pb)
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render("●")
+	symbol := t.Symbol()
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Bold(true).Render(symbol)
 }
 
 func incidentStyle(t data.IncidentType) lipgloss.Style {

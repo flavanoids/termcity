@@ -36,13 +36,13 @@ func (t IncidentType) String() string {
 func (t IncidentType) Symbol() string {
 	switch t {
 	case Fire:
-		return "🔴"
+		return "🔥"
 	case Police:
-		return "🔵"
+		return "👮"
 	case EMS:
-		return "⬜"
+		return "🚑"
 	default:
-		return "⬜"
+		return "⚪"
 	}
 }
 
