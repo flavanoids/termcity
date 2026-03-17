@@ -82,6 +82,20 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 - All URL construction uses `fmt.Sprintf` or `url.Values` — no string concatenation with user input
 - Tile cache paths are derived from integer tile coordinates only — no user-controlled path components
 
+## Dual-Version Parity Rule
+
+### Features Must Ship on Both TUI and Web Simultaneously
+Any user-facing feature added to either the TUI (`internal/model/`, `internal/ui/`) or the web frontend (`cmd/termcity-web/static/`) **must be implemented on both platforms in the same commit or PR**, unless explicitly marked as platform-specific.
+
+**Exceptions** (must be noted in the PR description):
+- TUI-only: features that rely on terminal rendering, half-block tiles, bubbletea key handling, or lipgloss layout with no meaningful web equivalent (e.g., pulse animation frame rate, ANSI cell splitting)
+- Web-only: features that rely on Leaflet, browser APIs, responsive layout, or mouse interaction with no meaningful TUI equivalent (e.g., map style dropdown, touch gestures)
+- Data-layer changes (`internal/data/`) are inherently shared and require no duplication
+
+**Shared data layer changes are always shared by definition** — no extra work required. The parity rule applies only to display/interaction features.
+
+When in doubt, implement on both. If one platform's implementation would be a stub or no-op, that is acceptable — document it with a `// TODO(web):` or `// TODO(tui):` comment.
+
 ## Dependency Rules
 - Only `charmbracelet/bubbletea`, `charmbracelet/lipgloss`, `charmbracelet/bubbles` are permitted as direct dependencies
 - All other functionality uses Go stdlib (`net/http`, `image/png`, `math`, `encoding/json`)
