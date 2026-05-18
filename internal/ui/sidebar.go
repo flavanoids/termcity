@@ -22,7 +22,8 @@ type IncidentValidation struct {
 // height is the available height (excluding status bar).
 // selected is the index of the currently highlighted incident.
 // pulseIntensity (0.0–1.0) modulates the brightness of incident symbols.
-func RenderSidebarWithValidation(incidents []data.Incident, validation []IncidentValidation, selected int, height int, focused bool, pulseIntensity float64) string {
+// showFire, showPolice, showEMS control which incident types are visible.
+func RenderSidebarWithValidation(incidents []data.Incident, validation []IncidentValidation, selected int, height int, focused bool, pulseIntensity float64, showFire, showPolice, showEMS bool) string {
 	var sb strings.Builder
 
 	titleText := "ACTIVE INCIDENTS"
@@ -70,13 +71,32 @@ func RenderSidebarWithValidation(incidents []data.Incident, validation []Inciden
 
 	for i := scrollOffset; i < len(incidents) && renderedLines < height; i++ {
 		inc := incidents[i]
+
+		// Filter by incident type
+		switch inc.Type {
+		case data.Fire:
+			if !showFire {
+				continue
+			}
+		case data.Police:
+			if !showPolice {
+				continue
+			}
+		case data.EMS:
+			if !showEMS {
+				continue
+			}
+		}
+
 		var val IncidentValidation
 		if i < len(validation) {
 			val = validation[i]
 		}
 
 		numStr := fmt.Sprintf("%d.", i+1)
-		symbol := incidentSymbolPulsed(inc.Type, pulseIntensity)
+		// Apply freshness-based dimming to symbol
+		symbolIntensity := FreshnessIntensity(val.Freshness, pulseIntensity)
+		symbol := incidentSymbolPulsed(inc.Type, symbolIntensity)
 		maxTitle := SidebarWidth - 4 - len(numStr) - 1
 		if maxTitle < 4 {
 			maxTitle = 4
@@ -106,7 +126,8 @@ func RenderSidebarWithValidation(incidents []data.Incident, validation []Inciden
 			style1 = SelectedIncidentStyle.Width(SidebarWidth)
 			style2 = SelectedIncidentStyle.Width(SidebarWidth).Foreground(ColorDim)
 		} else {
-			style1 = incidentStyle(inc.Type).Width(SidebarWidth)
+			// Apply freshness-based dimming to non-selected items
+			style1 = incidentStyleWithFreshness(inc.Type, val.Freshness).Width(SidebarWidth)
 			style2 = SidebarStyle.Width(SidebarWidth).Foreground(ColorDim)
 		}
 
@@ -164,6 +185,39 @@ func incidentStyle(t data.IncidentType) lipgloss.Style {
 		return IncidentEMSStyle
 	}
 	return SidebarStyle
+}
+
+// incidentStyleWithFreshness returns a style dimmed based on incident age.
+func incidentStyleWithFreshness(t data.IncidentType, bucket data.FreshnessBucket) lipgloss.Style {
+	base := incidentStyle(t)
+	switch bucket {
+	case data.FreshnessNew:
+		return base
+	case data.FreshnessRecent:
+		return base.Foreground(lipgloss.Color("#888888"))
+	case data.FreshnessStale:
+		return base.Foreground(lipgloss.Color("#666666"))
+	case data.FreshnessOld:
+		return base.Foreground(lipgloss.Color("#444444"))
+	default:
+		return base
+	}
+}
+
+// FreshnessIntensity returns a brightness multiplier (0.0-1.0) based on incident age.
+func FreshnessIntensity(bucket data.FreshnessBucket, pulse float64) float64 {
+	switch bucket {
+	case data.FreshnessNew:
+		return pulse
+	case data.FreshnessRecent:
+		return 0.5 + 0.4*pulse
+	case data.FreshnessStale:
+		return 0.3 + 0.3*pulse
+	case data.FreshnessOld:
+		return 0.15 + 0.15*pulse
+	default:
+		return 0.5 * pulse
+	}
 }
 
 func truncate(s string, maxLen int) string {

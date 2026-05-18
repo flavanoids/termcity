@@ -8,6 +8,7 @@ import (
 	_ "image/png"
 	"math"
 	"strconv"
+	"termcity/internal/data"
 )
 
 // PulseFrames is the number of animation frames in one full pulse cycle.
@@ -153,4 +154,21 @@ func NumberCell(ch rune, colorHex string, intensity float64) string {
 	b := uint8(float64(c.B) * intensity)
 	return fmt.Sprintf("\x1b[1m\x1b[38;2;255;255;255m\x1b[48;2;%d;%d;%dm%c\x1b[0m",
 		r, g, b, ch)
+}
+
+// FreshnessIntensity applies a brightness multiplier based on incident age.
+// New incidents use full pulse, older ones fade to minimum visibility.
+func FreshnessIntensity(bucket data.FreshnessBucket, pulse float64) float64 {
+	switch bucket {
+	case data.FreshnessNew:
+		return pulse // Full brightness
+	case data.FreshnessRecent:
+		return 0.5 + 0.4*pulse // 50-90% brightness
+	case data.FreshnessStale:
+		return 0.3 + 0.3*pulse // 30-60% brightness
+	case data.FreshnessOld:
+		return 0.15 + 0.15*pulse // 15-30% brightness (barely visible)
+	default:
+		return 0.5 * pulse // Unknown
+	}
 }

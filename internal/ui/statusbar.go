@@ -10,7 +10,8 @@ import (
 )
 
 // RenderStatusBarWithValidation renders the bottom status bar.
-func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents []data.Incident, validation []IncidentValidation, width int, loading bool, mapStyle string, numberBuf string) string {
+// showFire, showPolice, showEMS indicate which filters are active.
+func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents []data.Incident, validation []IncidentValidation, width int, loading bool, mapStyle string, numberBuf string, showFire, showPolice, showEMS bool) string {
 	// Count by type.
 	var fires, police, ems int
 	var staleCount, offMapCount, dupCount int
@@ -64,11 +65,23 @@ func RenderStatusBarWithValidation(zip string, nextRefresh time.Time, incidents 
 		parts = append(parts, StatusBarStyle.Render(fmt.Sprintf("Last %s", ago)))
 	}
 
-	// Incident counts.
+	// Incident counts with filter indicators.
+	fireIndicator := "●"
+	if !showFire {
+		fireIndicator = "○"
+	}
+	policeIndicator := "●"
+	if !showPolice {
+		policeIndicator = "○"
+	}
+	emsIndicator := "●"
+	if !showEMS {
+		emsIndicator = "○"
+	}
 	counts := fmt.Sprintf("%s%d  %s%d  %s%d",
-		lipgloss.NewStyle().Foreground(ColorFire).Render("●"), fires,
-		lipgloss.NewStyle().Foreground(ColorPolice).Render("●"), police,
-		lipgloss.NewStyle().Foreground(ColorEMS).Render("●"), ems,
+		lipgloss.NewStyle().Foreground(ColorFire).Render(fireIndicator), fires,
+		lipgloss.NewStyle().Foreground(ColorPolice).Render(policeIndicator), police,
+		lipgloss.NewStyle().Foreground(ColorEMS).Render(emsIndicator), ems,
 	)
 	parts = append(parts, counts)
 
@@ -117,12 +130,19 @@ func RenderHelpOverlay(width, height int) string {
 		lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render("Map (default focus)"),
 		fmt.Sprintf("  %-10s %s", "↑↓←→", "Pan map"),
 		fmt.Sprintf("  %-10s %s", "+/-", "Zoom in/out"),
+		fmt.Sprintf("  %-10s %s", "wheel", "Zoom in/out"),
 		fmt.Sprintf("  %-10s %s", "m", "Cycle map style"),
+		fmt.Sprintf("  %-10s %s", "zoom<13", "Clusters shown"),
 		"",
 		lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render("Events sidebar (Tab to focus)"),
 		fmt.Sprintf("  %-10s %s", "↑↓", "Navigate event list"),
 		fmt.Sprintf("  %-10s %s", "Enter", "Show event detail"),
 		fmt.Sprintf("  %-10s %s", "Esc", "Return to map"),
+		"",
+		lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render("Filters"),
+		fmt.Sprintf("  %-10s %s", "f", "Toggle Fire incidents"),
+		fmt.Sprintf("  %-10s %s", "p", "Toggle Police incidents"),
+		fmt.Sprintf("  %-10s %s", "e", "Toggle EMS incidents"),
 		"",
 		lipgloss.NewStyle().Bold(true).Foreground(ColorText).Render("Global"),
 		fmt.Sprintf("  %-10s %s", "1-9", "Jump to event # (detail)"),

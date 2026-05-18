@@ -70,6 +70,11 @@ type MapViewModel struct {
 	showHelp         bool
 	showDetail       bool
 
+	// Incident type filters
+	showFire   bool
+	showPolice bool
+	showEMS    bool
+
 	// Number-key quick-select buffer (e.g. press "1" "2" → incident #12).
 	numberBuf   string
 	numberBufAt time.Time
@@ -92,6 +97,9 @@ func NewMapViewModel(zip string, lat, lng float64, city string) MapViewModel {
 		nextRefresh:  time.Now().Add(60 * time.Second),
 		lastFetchLat: lat,
 		lastFetchLng: lng,
+		showFire:     true,
+		showPolice:   true,
+		showEMS:      true,
 	}
 }
 
@@ -170,6 +178,19 @@ func (m MapViewModel) Update(msg tea.Msg) (MapViewModel, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, m.fetchVisibleTiles()
+
+	case tea.MouseMsg:
+		// Handle mouse wheel for zoom
+		if msg.Type == tea.MouseWheelUp {
+			m.zoom = tilemap.ClampZoom(m.zoom + 1)
+			m.tileCache = make(map[tilemap.TileKey][][]string)
+			return m, m.fetchVisibleTiles()
+		}
+		if msg.Type == tea.MouseWheelDown {
+			m.zoom = tilemap.ClampZoom(m.zoom - 1)
+			m.tileCache = make(map[tilemap.TileKey][][]string)
+			return m, m.fetchVisibleTiles()
+		}
 
 	case TileReadyMsg:
 		if msg.Err == nil {
@@ -351,6 +372,18 @@ func (m MapViewModel) handleKey(msg tea.KeyMsg) (MapViewModel, tea.Cmd) {
 		m.tileCache = make(map[tilemap.TileKey][][]string)
 		return m, m.fetchVisibleTiles()
 
+	case "f":
+		m.showFire = !m.showFire
+		return m, nil
+
+	case "p":
+		m.showPolice = !m.showPolice
+		return m, nil
+
+	case "e":
+		m.showEMS = !m.showEMS
+		return m, nil
+
 	case "r":
 		m.loading = true
 		return m, fetchIncidentsCmd(m.lat, m.lng, m.city)
@@ -479,7 +512,7 @@ func (m MapViewModel) View() string {
 	// Render map area.
 	mapContent := m.renderMap(mapCols, mapRows)
 
-	sidebar := ui.RenderSidebarWithValidation(m.incidents, m.validation, m.selectedIncident, mapRows, m.focus == FocusSidebar, tilemap.PulseIntensity(m.frame))
+	sidebar := ui.RenderSidebarWithValidation(m.incidents, m.validation, m.selectedIncident, mapRows, m.focus == FocusSidebar, tilemap.PulseIntensity(m.frame), m.showFire, m.showPolice, m.showEMS)
 	mapLines := strings.Split(mapContent, "\n")
 	sidebarLines := strings.Split(sidebar, "\n")
 
@@ -511,7 +544,7 @@ func (m MapViewModel) View() string {
 	}
 	view := joined.String()
 
-	statusBar := ui.RenderStatusBarWithValidation(m.zip, m.nextRefresh, m.incidents, m.validation, m.width, m.loading, m.tileSource.Name(), m.numberBuf)
+	statusBar := ui.RenderStatusBarWithValidation(m.zip, m.nextRefresh, m.incidents, m.validation, m.width, m.loading, m.tileSource.Name(), m.numberBuf, m.showFire, m.showPolice, m.showEMS)
 	result := view + "\n" + statusBar
 
 	if m.showDetail && len(m.incidents) > 0 && m.selectedIncident < len(m.incidents) {
@@ -569,42 +602,127 @@ func (m MapViewModel) renderMap(cols, rows int) string {
 		}
 	}
 
-	// Overlay numbered incident markers (3+ cells wide, 2 rows tall) with pulse.
+	// Overlay incident markers (individual or clustered) with pulse.
 	pulse := tilemap.PulseIntensity(m.frame)
-	for i, inc := range m.incidents {
-		if i < len(m.validation) && m.validation[i].OffMap {
-			continue
-		}
-		incPX, incPY := tilemap.LatLngToPixelCoord(inc.Lat, inc.Lng, m.zoom)
-		col, row := tilemap.PixelToCell(incPX, incPY, originPX, originPY)
 
-		numStr := strconv.Itoa(i + 1)
-		markerW := len(numStr) + 2
-		startCol := col - markerW/2
-		colorHex := inc.Type.Color()
+	if tilemap.ShouldCluster(m.zoom) {
+		// Use clustering for low zoom levels
+		clusters := tilemap.ClusterIncidents(m.incidents, m.lat, m.lng, m.zoom, cols, rows)
+		for _, cluster := range clusters {
+			// Skip if cluster type is filtered out
+			dominantType := cluster.DominantType()
+			switch dominantType {
+			case data.Fire:
+				if !m.showFire {
+					continue
+				}
+			case data.Police:
+				if !m.showPolice {
+					continue
+				}
+			case data.EMS:
+				if !m.showEMS {
+					continue
+				}
+			}
 
-		// Top row: solid colored background.
-		if row-1 >= 0 && row-1 < rows {
-			for dx := 0; dx < markerW; dx++ {
-				gc := startCol + dx
-				if gc >= 0 && gc < cols {
-					grid[row-1][gc] = tilemap.SolidBgCell(colorHex, pulse)
+			clusterPX, clusterPY := tilemap.LatLngToPixelCoord(cluster.Lat, cluster.Lng, m.zoom)
+			col, row := tilemap.PixelToCell(clusterPX, clusterPY, originPX, originPY)
+
+			label := cluster.ClusterLabel()
+			markerW := len(label) + 2
+			startCol := col - markerW/2
+			colorHex := dominantType.Color()
+
+			// Clusters use full intensity (they're already aggregated)
+			intensity := 0.7 + 0.3*pulse
+
+			// Top row: solid colored background.
+			if row-1 >= 0 && row-1 < rows {
+				for dx := 0; dx < markerW; dx++ {
+					gc := startCol + dx
+					if gc >= 0 && gc < cols {
+						grid[row-1][gc] = tilemap.SolidBgCell(colorHex, intensity)
+					}
+				}
+			}
+
+			// Main row: padding + label digits + padding.
+			if row >= 0 && row < rows {
+				for dx := 0; dx < markerW; dx++ {
+					gc := startCol + dx
+					if gc < 0 || gc >= cols {
+						continue
+					}
+					digitIdx := dx - 1
+					if digitIdx >= 0 && digitIdx < len(label) {
+						grid[row][gc] = tilemap.NumberCell(rune(label[digitIdx]), colorHex, intensity)
+					} else {
+						grid[row][gc] = tilemap.SolidBgCell(colorHex, intensity)
+					}
 				}
 			}
 		}
-
-		// Main row: padding + number digits + padding.
-		if row >= 0 && row < rows {
-			for dx := 0; dx < markerW; dx++ {
-				gc := startCol + dx
-				if gc < 0 || gc >= cols {
+	} else {
+		// Render individual numbered markers
+		for i, inc := range m.incidents {
+			if i < len(m.validation) && m.validation[i].OffMap {
+				continue
+			}
+			// Filter by incident type
+			switch inc.Type {
+			case data.Fire:
+				if !m.showFire {
 					continue
 				}
-				digitIdx := dx - 1
-				if digitIdx >= 0 && digitIdx < len(numStr) {
-					grid[row][gc] = tilemap.NumberCell(rune(numStr[digitIdx]), colorHex, pulse)
-				} else {
-					grid[row][gc] = tilemap.SolidBgCell(colorHex, pulse)
+			case data.Police:
+				if !m.showPolice {
+					continue
+				}
+			case data.EMS:
+				if !m.showEMS {
+					continue
+				}
+			}
+			incPX, incPY := tilemap.LatLngToPixelCoord(inc.Lat, inc.Lng, m.zoom)
+			col, row := tilemap.PixelToCell(incPX, incPY, originPX, originPY)
+
+			numStr := strconv.Itoa(i + 1)
+			markerW := len(numStr) + 2
+			startCol := col - markerW/2
+			colorHex := inc.Type.Color()
+
+			// Apply freshness-based opacity multiplier
+			var intensity float64
+			if i < len(m.validation) {
+				intensity = tilemap.FreshnessIntensity(m.validation[i].Freshness, pulse)
+			} else {
+				intensity = pulse * 0.7 // Default to slightly dimmed if no validation
+			}
+
+			// Top row: solid colored background.
+			if row-1 >= 0 && row-1 < rows {
+				for dx := 0; dx < markerW; dx++ {
+					gc := startCol + dx
+					if gc >= 0 && gc < cols {
+						grid[row-1][gc] = tilemap.SolidBgCell(colorHex, intensity)
+					}
+				}
+			}
+
+			// Main row: padding + number digits + padding.
+			if row >= 0 && row < rows {
+				for dx := 0; dx < markerW; dx++ {
+					gc := startCol + dx
+					if gc < 0 || gc >= cols {
+						continue
+					}
+					digitIdx := dx - 1
+					if digitIdx >= 0 && digitIdx < len(numStr) {
+						grid[row][gc] = tilemap.NumberCell(rune(numStr[digitIdx]), colorHex, intensity)
+					} else {
+						grid[row][gc] = tilemap.SolidBgCell(colorHex, intensity)
+					}
 				}
 			}
 		}

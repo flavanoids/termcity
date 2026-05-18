@@ -25,8 +25,12 @@ For people who live near emergency activity and want to know what's happening ar
 - **Live map** — OpenStreetMap tiles rendered with half-block Unicode, pan and zoom freely
 - **Real-time incidents** — Fire, EMS, and police incidents fetched from public APIs
 - **Pulsing markers** — Animated incident dots with color-coded type (red/white/blue)
+- **Time-based fading** — Older incidents fade automatically (new → recent → stale → old)
+- **Marker clustering** — When zoomed out, nearby incidents group into numbered clusters
+- **Incident type filters** — Toggle Fire (`f`), Police (`p`), EMS (`e`) on/off
 - **Incident sidebar** — Scrollable list with address, type, and timestamp
 - **Detail overlay** — Select any incident for responding unit details
+- **Recent zips** — Quick access to last 5 locations on startup
 - **Disk tile cache** — Tiles cached at `~/.cache/termcity/tiles/` to reduce network load
 - **Rate-limited** — Respects OSM and Nominatim ToS out of the box
 
@@ -54,46 +58,122 @@ On launch, enter any US zip code to center the map on that location.
 
 ## Web version
 
-A separate browser-based binary with the same functionality (geocode by ZIP, OSM map, incidents, sidebar, detail modal). It uses the same data layer and is optimized for desktop and mobile.
+A browser-based server with the same functionality (geocode by ZIP, OSM map, incidents, sidebar, detail modal). It uses the same data layer and is optimized for desktop and mobile. Includes SQLite-backed incident history (7-day retention).
 
-**Run (separate binary, background by default):**
+### Quick Start
 
 ```bash
 go build -o termcity-web ./cmd/termcity-web
-./termcity-web
+./termcity-web -port 8911 -foreground 10001
 ```
 
-The server starts in the background and prints the URL and port, for example:
+Then open http://localhost:8911 in your browser.
 
+### Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-port N` | 8911 | HTTP server port |
+| `-foreground` | false | Run in foreground (logs to stdout) |
+
+### Production Deployment (systemd)
+
+**1. Install the binary:**
+
+```bash
+go build -o termcity-web ./cmd/termcity-web
+sudo cp termcity-web /usr/local/bin/
+sudo chmod +x /usr/local/bin/termcity-web
 ```
-TermCity web server is running in the background.
-Open in your browser: http://localhost:8080
-Port: 8080 (stop with: kill <pid>)
+
+**2. Create system user:**
+
+```bash
+sudo useradd --system --home /var/lib/termcity --create-home --shell /usr/sbin/nologin termcity
 ```
 
-Then open the printed URL in your browser. Enter a US zip code to load the map and incidents. Use the map style dropdown (OSM / Dark / Light), the Refresh button or <kbd>r</kbd>, and click markers or list items for details. Keyboard: <kbd>1</kbd>–<kbd>9</kbd> jump to incident and show detail; <kbd>?</kbd> opens help.
+**3. Create systemd service:** `/etc/systemd/system/termcity-web.service`
 
-**Options:** `-port 8080` (default; overridden by `PORT` env), `-foreground` to run in the foreground (e.g. under systemd or to see logs).
+```ini
+[Unit]
+Description=TermCity Web — 911 incident map viewer
+After=network-online.target
+Wants=network-online.target
 
-**Install via .deb (Linux amd64):**
+[Service]
+Type=simple
+User=termcity
+Group=termcity
+WorkingDirectory=/var/lib/termcity
+Environment="TERMCITY_ZIP=10001"
+Environment="TERMCITY_PORT=8911"
+ExecStart=/usr/local/bin/termcity-web -port ${TERMCITY_PORT} ${TERMCITY_ZIP}
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/termcity
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+```
+
+**4. Enable and start:**
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable termcity-web
+sudo systemctl start termcity-web
+```
+
+**Management:**
+
+```bash
+sudo systemctl status termcity-web    # Check status
+sudo journalctl -u termcity-web -f    # View logs
+sudo systemctl restart termcity-web   # Restart
+```
+
+Change the zip code by editing `Environment="TERMCITY_ZIP=..."` in the service file, then `systemctl restart termcity-web`.
+
+### Build .deb Package
 
 ```bash
 ./scripts/build-deb-web.sh
 sudo dpkg -i termcity-web_1.0.0_amd64.deb
+sudo systemctl enable --now termcity-web
 ```
 
-Then run `termcity-web`; it will start in the background and print the URL and port.
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | Web UI (HTML) |
+| `GET /api/incidents` | Live incidents with metadata |
+| `GET /api/history?days=N` | Historical incidents (1, 3, or 7 days) |
+| `POST /api/history/clear` | Clear history database |
+| `GET /api/status` | Server status and history counts |
 
 ## Key Bindings
 
 | Key | Action |
 |-----|--------|
 | `+` / `-` | Zoom in / out |
+| Mouse wheel | Zoom in / out |
 | Arrow keys | Pan map |
 | `j` / `k` | Scroll incident list |
-| `Tab` | Toggle sidebar |
+| `Tab` | Toggle sidebar focus |
+| `Enter` | Show incident detail / select |
+| `1`–`9` | Jump to incident # and show detail |
+| `f` | Toggle Fire incidents filter |
+| `p` | Toggle Police incidents filter |
+| `e` | Toggle EMS incidents filter |
+| `m` | Cycle map style (OSM / Dark / Light) |
 | `r` | Refresh incidents |
 | `?` | Toggle help overlay |
+| `Esc` | Return focus to map / close overlay |
 | `q` / `Ctrl+C` | Quit |
 
 ## Data Sources

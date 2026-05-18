@@ -52,6 +52,15 @@ func migrate(db *sql.DB) error {
 			logged_at     DATETIME NOT NULL DEFAULT (datetime('now'))
 		);
 		CREATE INDEX IF NOT EXISTS idx_incidents_reported ON incidents(reported_at);
+
+		CREATE TABLE IF NOT EXISTS recent_zips (
+			zip TEXT PRIMARY KEY,
+			city TEXT NOT NULL DEFAULT '',
+			lat REAL NOT NULL,
+			lng REAL NOT NULL,
+			used_at DATETIME NOT NULL DEFAULT (datetime('now'))
+		);
+		CREATE INDEX IF NOT EXISTS idx_recent_zips_used ON recent_zips(used_at DESC);
 	`)
 	if err != nil {
 		return fmt.Errorf("migrating history db: %w", err)
@@ -170,6 +179,66 @@ func (s *Store) Stats() (day1, day3, day7 int, err error) {
 		}
 	}
 	return
+}
+
+// RecentZip represents a recently used zip code.
+type RecentZip struct {
+	Zip   string
+	City  string
+	Lat   float64
+	Lng   float64
+	UsedAt time.Time
+}
+
+// SaveRecentZip saves or updates a zip code in the recent zips table.
+func (s *Store) SaveRecentZip(zip, city string, lat, lng float64) error {
+	_, err := s.db.Exec(`
+		INSERT INTO recent_zips (zip, city, lat, lng, used_at)
+		VALUES (?, ?, ?, ?, datetime('now'))
+		ON CONFLICT(zip) DO UPDATE SET
+			city = excluded.city,
+			lat = excluded.lat,
+			lng = excluded.lng,
+			used_at = datetime('now')
+	`, zip, city, lat, lng)
+	if err != nil {
+		return fmt.Errorf("saving recent zip: %w", err)
+	}
+
+	// Prune to keep only the 5 most recent.
+	_, err = s.db.Exec(`
+		DELETE FROM recent_zips WHERE zip NOT IN (
+			SELECT zip FROM recent_zips ORDER BY used_at DESC LIMIT 5
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("pruning recent zips: %w", err)
+	}
+	return nil
+}
+
+// GetRecentZips returns the 5 most recently used zip codes.
+func (s *Store) GetRecentZips() ([]RecentZip, error) {
+	rows, err := s.db.Query(`
+		SELECT zip, city, lat, lng, used_at
+		FROM recent_zips
+		ORDER BY used_at DESC
+		LIMIT 5
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("querying recent zips: %w", err)
+	}
+	defer rows.Close()
+
+	var zips []RecentZip
+	for rows.Next() {
+		var z RecentZip
+		if err := rows.Scan(&z.Zip, &z.City, &z.Lat, &z.Lng, &z.UsedAt); err != nil {
+			return nil, fmt.Errorf("scanning recent zip: %w", err)
+		}
+		zips = append(zips, z)
+	}
+	return zips, rows.Err()
 }
 
 // dedupKey produces a stable hash for an incident so the same real-world event

@@ -1,7 +1,10 @@
 package model
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
+	"termcity/internal/history"
 	"termcity/internal/ui"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -15,6 +18,8 @@ type ZipInputModel struct {
 	err       string
 	width     int
 	height    int
+
+	recentZips []history.RecentZip
 }
 
 func NewZipInputModel() ZipInputModel {
@@ -30,7 +35,28 @@ func NewZipInputModel() ZipInputModel {
 }
 
 func (m ZipInputModel) Init() tea.Cmd {
-	return textinput.Blink
+	return tea.Batch(
+		textinput.Blink,
+		func() tea.Msg {
+			return fetchRecentZipsCmd()()
+		},
+	)
+}
+
+type RecentZipsMsg struct {
+	Zips []history.RecentZip
+}
+
+func fetchRecentZipsCmd() tea.Cmd {
+	return func() tea.Msg {
+		store, err := openHistoryStore()
+		if err != nil {
+			return RecentZipsMsg{Zips: nil}
+		}
+		defer store.Close()
+		zips, _ := store.GetRecentZips()
+		return RecentZipsMsg{Zips: zips}
+	}
 }
 
 func (m ZipInputModel) Update(msg tea.Msg) (ZipInputModel, tea.Cmd) {
@@ -38,6 +64,9 @@ func (m ZipInputModel) Update(msg tea.Msg) (ZipInputModel, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+	case RecentZipsMsg:
+		m.recentZips = msg.Zips
 
 	case tea.KeyMsg:
 		switch msg.Type {
@@ -59,6 +88,17 @@ func (m ZipInputModel) Update(msg tea.Msg) (ZipInputModel, tea.Cmd) {
 			}
 		case tea.KeyCtrlC:
 			return m, tea.Quit
+		}
+
+		// Handle number keys for quick selection of recent zips
+		key := msg.String()
+		if len(key) == 1 && key[0] >= '1' && key[0] <= '5' {
+			idx := int(key[0] - '1')
+			if idx < len(m.recentZips) {
+				return m, func() tea.Msg {
+					return ZipSubmittedMsg{Zip: m.recentZips[idx].Zip}
+				}
+			}
 		}
 	}
 
@@ -84,12 +124,28 @@ func (m ZipInputModel) View() string {
 		errLine = "\n" + ui.ErrorStyle.Render("⚠ "+m.err)
 	}
 
+	var recentSection string
+	if len(m.recentZips) > 0 {
+		var recentLines []string
+		recentLines = append(recentLines, ui.SidebarDividerStyle.Render(strings.Repeat("─", 30)))
+		recentLines = append(recentLines, ui.SidebarTitleStyle.Render("Recent Locations"))
+		for i, z := range m.recentZips {
+			label := ui.HelpStyle.Render(string('1'+i)) + " " + z.Zip
+			if z.City != "" {
+				label += ui.HelpStyle.Render(" — "+z.City)
+			}
+			recentLines = append(recentLines, label)
+		}
+		recentSection = lipgloss.JoinVertical(lipgloss.Left, recentLines...)
+	}
+
 	content := lipgloss.JoinVertical(lipgloss.Center,
 		title,
 		subtitle,
 		"",
 		inputBox,
 		errLine,
+		recentSection,
 	)
 
 	// Center vertically.
@@ -108,4 +164,15 @@ func (m ZipInputModel) View() string {
 // ZipSubmittedMsg signals that the user has entered a valid zip code.
 type ZipSubmittedMsg struct {
 	Zip string
+}
+
+func openHistoryStore() (*history.Store, error) {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	dir := filepath.Join(cacheDir, "termcity")
+	os.MkdirAll(dir, 0755)
+	dbPath := filepath.Join(dir, "history.db")
+	return history.Open(dbPath)
 }

@@ -87,6 +87,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.width > 0 {
 			cmds = append(cmds, m.mapView.fetchVisibleTiles())
 		}
+		// Save this zip to recent history
+		cmds = append(cmds, saveRecentZipCmd(m.zip, msg.Loc.City, msg.Loc.Lat, msg.Loc.Lng))
 		return m, tea.Batch(cmds...)
 
 	case tea.KeyMsg:
@@ -140,5 +142,18 @@ func geocodeCmd(zip string) tea.Cmd {
 	return func() tea.Msg {
 		loc, err := data.GeocodeZip(zip)
 		return GeocodeDoneMsg{Loc: loc, Err: err}
+	}
+}
+
+// saveRecentZipCmd saves a zip code to the recent zips table.
+func saveRecentZipCmd(zip, city string, lat, lng float64) tea.Cmd {
+	return func() tea.Msg {
+		store, err := openHistoryStore()
+		if err != nil {
+			return nil
+		}
+		defer store.Close()
+		_ = store.SaveRecentZip(zip, city, lat, lng)
+		return nil
 	}
 }
